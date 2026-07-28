@@ -1,0 +1,27 @@
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", extra="ignore")
+
+    secret_key: str = "dev-secret-change-me"
+    database_url: str = f"sqlite:///{DATA_DIR / 'coach.db'}"
+    token_expire_hours: int = 24 * 7
+
+    # LLM provider (OpenAI-compatible). Defaults: Kimi K2.
+    llm_base_url: str = "https://api.moonshot.ai/v1"
+    llm_api_key: str = ""
+    llm_model: str = "kimi-k2-0905-preview"
+
+    # Garmin Connect (unofficial API). Optional until push/sync is used.
+    garmin_email: str = ""
+    garmin_password: str = ""
+    garmin_token_store: str = str(DATA_DIR / "garmin_tokens")
+
+
+settings = Settings()
