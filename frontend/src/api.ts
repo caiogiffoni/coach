@@ -4,13 +4,16 @@
 
 import type {
   AuthStatus,
+  DayGuardResult,
   GarminStatus,
   GenerateWeekRequest,
   ImportReport,
+  IngestionStatus,
   LoginResult,
   Profile,
   ProfileUpdate,
   PushReport,
+  SyncReport,
   TokenResponse,
   UserResponse,
   WeekPlan,
@@ -59,7 +62,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   })
 
+  let errorData: unknown = null
+  if (!res.ok) {
+    errorData = await res.json().catch(() => null)
+  }
+
   if (res.status === 401 && getToken()) {
+    // Garmin MFA challenges are returned as 401 with needs_mfa: do not bounce.
+    const data = errorData as { needs_mfa?: boolean } | null
+    if (data?.needs_mfa) {
+      throw new ApiError(401, JSON.stringify(data))
+    }
     // Expired/invalid session: drop the token and bounce to login.
     clearToken()
     window.location.assign('/login')
@@ -68,16 +81,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`
-    try {
-      const data = await res.json()
-      if (typeof data.detail === 'string') {
-        message = data.detail
-      } else if (Array.isArray(data.detail) && data.detail.length > 0) {
-        // FastAPI 422 validation errors: [{loc, msg, ...}]
-        message = data.detail.map((e: { msg?: string }) => e.msg ?? '').join('; ')
-      }
-    } catch {
-      // non-JSON error body: keep the generic message
+    const data = errorData as { detail?: string | Array<{ msg?: string }> } | null
+    if (typeof data?.detail === 'string') {
+      message = data.detail
+    } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
+      // FastAPI 422 validation errors: [{loc, msg, ...}]
+      message = data.detail.map((e) => e.msg ?? '').join('; ')
     }
     throw new ApiError(res.status, message)
   }
@@ -112,6 +121,16 @@ export const profile = {
   zones: () => request<ZonesResponse>('/profile/zones'),
 }
 
+// --- Ingestion ------------------------------------------------------------------
+
+export const ingestion = {
+  status: () => request<IngestionStatus>('/ingestion/status'),
+  import: (path: string) =>
+    request<ImportReport>('/ingestion/import', { method: 'POST', body: { path } }),
+  sync: (days = 14) =>
+    request<SyncReport>('/ingestion/sync', { method: 'POST', body: { days } }),
+}
+
 // --- Coaching -----------------------------------------------------------------
 
 export const coaching = {
@@ -121,13 +140,11 @@ export const coaching = {
   getWeek: (weekStart: string) => request<WeekPlan>(`/coaching/weeks/${weekStart}`),
   approveWeek: (weekStart: string) =>
     request<WeekPlan>(`/coaching/weeks/${weekStart}/approve`, { method: 'POST' }),
-}
-
-// --- Ingestion ------------------------------------------------------------------
-
-export const ingestion = {
-  import: (path: string) =>
-    request<ImportReport>('/ingestion/import', { method: 'POST', body: { path } }),
+  guard: (weekStart: string, date: string, days?: number[]) => {
+    const params = new URLSearchParams({ week_start: weekStart, date })
+    if (days && days.length > 0) params.set('days', days.join(','))
+    return request<DayGuardResult>(`/coaching/guard?${params.toString()}`)
+  },
 }
 
 // --- Garmin -------------------------------------------------------------------

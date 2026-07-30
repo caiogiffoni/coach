@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { RefreshCw } from 'lucide-react'
-import type { Workout } from '../types'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
+import type { DayGuardResult, Workout } from '../types'
 import { formatDateShort, WEEKDAY_NAMES } from '../format'
 import { derivedDistanceKm, stepTargetText, workoutZones } from '../workout'
 
@@ -10,10 +10,21 @@ interface DayCardProps {
   workout: Workout | null
   draft: boolean
   busy: boolean
+  guard: DayGuardResult | null
   onRegenerateDay: (date: string) => void
+  onRegenerateFromGuard?: (date: string, reason: string) => void
 }
 
-export function DayCard({ date, weekday, workout, draft, busy, onRegenerateDay }: DayCardProps) {
+export function DayCard({
+  date,
+  weekday,
+  workout,
+  draft,
+  busy,
+  guard,
+  onRegenerateDay,
+  onRegenerateFromGuard,
+}: DayCardProps) {
   const [expanded, setExpanded] = useState(false)
 
   if (!workout) {
@@ -30,6 +41,7 @@ export function DayCard({ date, weekday, workout, draft, busy, onRegenerateDay }
   }
 
   const km = derivedDistanceKm(workout)
+  const guardAction = guard && guard.recommendation !== 'proceed'
 
   return (
     <div className="day-card">
@@ -39,6 +51,17 @@ export function DayCard({ date, weekday, workout, draft, busy, onRegenerateDay }
           {workout.slot_type}
         </span>
       </div>
+      {guardAction && (
+        <div className="day-card-alert">
+          <AlertTriangle size={14} strokeWidth={1.5} />
+          <span className={`badge badge-${guard.recommendation === 'veto' ? 'danger' : 'warning'}`}>
+            {guard.recommendation}
+          </span>
+          <span className="muted" title={guard.reason}>
+            {guard.reason}
+          </span>
+        </div>
+      )}
       <div className="day-card-name">{workout.name}</div>
       <div className="day-card-meta mono">
         {Math.round(workout.duration_min)} min
@@ -91,6 +114,18 @@ export function DayCard({ date, weekday, workout, draft, busy, onRegenerateDay }
         >
           <RefreshCw size={14} strokeWidth={1.5} />
           Regenerate
+        </button>
+      )}
+      {guardAction && onRegenerateFromGuard && draft && (
+        <button
+          type="button"
+          className="button button-warning button-compact"
+          onClick={() => onRegenerateFromGuard(date, guard.reason)}
+          disabled={busy}
+          title="Regenerate this day using the guard recommendation"
+        >
+          <RefreshCw size={14} strokeWidth={1.5} />
+          Regenerate from guard
         </button>
       )}
     </div>

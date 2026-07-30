@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { ApiError, coaching, garmin, profile } from '../api'
+import { ApiError, coaching, garmin, ingestion, profile } from '../api'
 import { DayCard } from '../components/DayCard'
 import {
   addDays,
@@ -11,12 +11,29 @@ import {
   toISODate,
   WEEKDAY_NAMES,
 } from '../format'
-import type { GarminStatus, PushReport, WeekPlan } from '../types'
+import type {
+  DayGuardResult,
+  GarminStatus,
+  IngestionStatus,
+  PushReport,
+  SyncReport,
+  WeekPlan,
+} from '../types'
 
 const STATUS_BADGE: Record<string, string> = {
   draft: 'badge-muted',
   approved: 'badge-success',
   pushed: 'badge-success',
+}
+
+function daysBetween(isoA: string, isoB: string): number {
+  const a = fromISODate(isoA).getTime()
+  const b = fromISODate(isoB).getTime()
+  return Math.round((b - a) / (1000 * 60 * 60 * 24))
+}
+
+function todayIso(): string {
+  return toISODate(new Date())
 }
 
 export function Week() {
@@ -35,6 +52,15 @@ export function Week() {
   const [pushReport, setPushReport] = useState<PushReport | null>(null)
   const [needsMfa, setNeedsMfa] = useState(false)
   const [mfaCode, setMfaCode] = useState('')
+
+  // Sync + staleness state
+  const [ingestionStatus, setIngestionStatus] = useState<IngestionStatus | null>(null)
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null)
+  const [syncNeedsMfa, setSyncNeedsMfa] = useState(false)
+  const [syncMfaCode, setSyncMfaCode] = useState('')
+
+  // Per-day guard results
+  const [guardByDate, setGuardByDate] = useState<Record<string, DayGuardResult>>({})
 
   // Initialize run-day checkboxes from the profile's preferred days.
   useEffect(() => {
@@ -64,9 +90,19 @@ export function Week() {
     }
   }, [])
 
+  const loadStaleness = useCallback(async () => {
+    try {
+      const status = await ingestion.status()
+      setIngestionStatus(status)
+    } catch {
+      setIngestionStatus(null)
+    }
+  }, [])
+
   useEffect(() => {
     loadPlan(weekStart)
-  }, [weekStart, loadPlan])
+    loadStaleness()
+  }, [weekStart, loadPlan, loadStaleness])
 
   useEffect(() => {
     garmin
@@ -74,6 +110,43 @@ export function Week() {
       .then((s) => setGarminStatus(s))
       .catch(() => setGarminStatus(null))
   }, [weekStart])
+
+  // Auto-sync on open if Garmin is configured.
+  useEffect(() => {
+    if (!garminStatus?.configured || syncReport || syncNeedsMfa) return
+    executeSync(false).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [garminStatus?.configured])
+
+  // Fetch guard results for every day that has a planned workout.
+  useEffect(() => {
+    if (!plan) {
+      setGuardByDate({})
+      return
+    }
+    let cancelled = false
+    const today = todayIso()
+    Promise.all(
+      plan.workouts.map(async (w) => {
+        if (w.date > today) return null
+        try {
+          return await coaching.guard(weekStart, w.date)
+        } catch {
+          return null
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return
+      const byDate: Record<string, DayGuardResult> = {}
+      for (const r of results) {
+        if (r) byDate[r.date] = r
+      }
+      setGuardByDate(byDate)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [plan, weekStart])
 
   function pickWeek(value: string) {
     if (!value) return
@@ -113,6 +186,15 @@ export function Week() {
 
   const regenerateDay = (date: string) =>
     run(() => coaching.generateWeek({ week: weekStart, day_date: date }))
+
+  const regenerateFromGuard = (date: string, reason: string) =>
+    run(() =>
+      coaching.generateWeek({
+        week: weekStart,
+        day_date: date,
+        notes: [notes.trim(), `Guard: ${reason}`].filter(Boolean).join(' — '),
+      }),
+    )
 
   const approve = () => run(() => coaching.approveWeek(weekStart))
 
@@ -162,6 +244,59 @@ export function Week() {
     }
   }
 
+  async function executeSync(showError = true) {
+    setBusy(true)
+    setError(showError ? null : error)
+    setSyncReport(null)
+    setSyncNeedsMfa(false)
+    try {
+      const report = await ingestion.sync()
+      setSyncReport(report)
+      await loadStaleness()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        try {
+          const body = JSON.parse(err.message)
+          if (body?.needs_mfa) {
+            setSyncNeedsMfa(true)
+            return
+          }
+        } catch {
+          // fall through
+        }
+      }
+      if (showError) {
+        setError(err instanceof ApiError ? err.message : 'Sync failed')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitSyncMfa() {
+    if (!syncMfaCode) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await garmin.login(syncMfaCode)
+      if (!result.success && result.needs_mfa) {
+        setError(result.message || 'MFA required')
+        return
+      }
+      if (!result.success) {
+        setError(result.message || 'Login failed')
+        return
+      }
+      setSyncNeedsMfa(false)
+      setSyncMfaCode('')
+      await executeSync()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'MFA login failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const draft = plan?.status === 'draft'
   const approved = plan?.status === 'approved'
   const weekDates = Array.from({ length: 7 }, (_, i) =>
@@ -169,6 +304,14 @@ export function Week() {
   )
 
   const garminConfigured = garminStatus?.configured ?? false
+
+  const stalenessText = useMemo(() => {
+    const newest = syncReport?.newest_date ?? ingestionStatus?.newest_date
+    if (!newest) return null
+    const age = daysBetween(newest, todayIso())
+    if (age === 0) return `Data as of ${newest} (today)`
+    return `Data as of ${newest} (${age} day${age === 1 ? '' : 's'} old)`
+  }, [syncReport, ingestionStatus])
 
   return (
     <>
@@ -262,8 +405,13 @@ export function Week() {
       )}
       {garminStatus && !garminStatus.configured && (
         <div className="banner banner-warning" role="alert">
-          Garmin credentials not configured. Push to Garmin is disabled until
-          GARMIN_EMAIL and GARMIN_PASSWORD are set on the backend.
+          Garmin credentials not configured. Push to Garmin and auto-sync are
+          disabled until GARMIN_EMAIL and GARMIN_PASSWORD are set on the backend.
+        </div>
+      )}
+      {stalenessText && (
+        <div className="banner banner-info" role="status">
+          {stalenessText}
         </div>
       )}
       {plan?.source === 'fallback' && (
@@ -282,12 +430,12 @@ export function Week() {
         </div>
       )}
 
-      {needsMfa && (
+      {(needsMfa || syncNeedsMfa) && (
         <section className="section">
           <div className="card">
             <h2 className="card-title">Garmin two-factor authentication</h2>
             <p className="field-hint" style={{ marginBottom: 12 }}>
-              Enter the MFA code from your authenticator app to continue the push.
+              Enter the MFA code from your authenticator app to continue.
             </p>
             <div className="field">
               <label className="field-label" htmlFor="mfa-code">
@@ -299,32 +447,80 @@ export function Week() {
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && submitMfa()}
+                value={syncNeedsMfa ? syncMfaCode : mfaCode}
+                onChange={(e) =>
+                  syncNeedsMfa ? setSyncMfaCode(e.target.value) : setMfaCode(e.target.value)
+                }
+                onKeyDown={(e) =>
+                  e.key === 'Enter' && (syncNeedsMfa ? submitSyncMfa() : submitMfa())
+                }
               />
             </div>
             <div className="form-actions">
               <button
                 type="button"
                 className="button button-primary"
-                onClick={submitMfa}
-                disabled={busy || !mfaCode}
+                onClick={syncNeedsMfa ? submitSyncMfa : submitMfa}
+                disabled={busy || !(syncNeedsMfa ? syncMfaCode : mfaCode)}
               >
-                Verify and push
+                Verify and continue
               </button>
               <button
                 type="button"
                 className="button button-secondary"
                 onClick={() => {
                   setNeedsMfa(false)
+                  setSyncNeedsMfa(false)
                   setMfaCode('')
+                  setSyncMfaCode('')
                 }}
                 disabled={busy}
               >
                 Cancel
               </button>
             </div>
+          </div>
+        </section>
+      )}
+
+      {syncReport && (
+        <section className="section">
+          <div className="card">
+            <h2 className="card-title">Sync report</h2>
+            <div className="sync-grid">
+              <div>
+                <span className="field-label">Activities</span>
+                <p className="mono">{syncReport.activities}</p>
+              </div>
+              <div>
+                <span className="field-label">Wellness</span>
+                <p className="mono">{syncReport.daily_wellness}</p>
+              </div>
+              <div>
+                <span className="field-label">HRV</span>
+                <p className="mono">{syncReport.hrv}</p>
+              </div>
+              <div>
+                <span className="field-label">Readiness</span>
+                <p className="mono">{syncReport.training_readiness}</p>
+              </div>
+              <div>
+                <span className="field-label">Load</span>
+                <p className="mono">{syncReport.training_load}</p>
+              </div>
+            </div>
+            {syncReport.skipped_datasets.length > 0 && (
+              <div className="field">
+                <span className="field-label">Skipped datasets</span>
+                <p className="mono">{syncReport.skipped_datasets.join(', ')}</p>
+              </div>
+            )}
+            {syncReport.newest_date && (
+              <div className="field">
+                <span className="field-label">Newest date</span>
+                <p className="mono">{syncReport.newest_date}</p>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -372,7 +568,19 @@ export function Week() {
 
       <section className="section">
         <div className="card">
-          <h2 className="card-title">Generate week</h2>
+          <div className="card-header-row">
+            <h2 className="card-title">Generate week</h2>
+            <button
+              type="button"
+              className="button button-secondary button-compact"
+              onClick={() => executeSync()}
+              disabled={busy}
+              title="Pull recent data from Garmin Connect"
+            >
+              <RotateCcw size={14} strokeWidth={1.5} />
+              Sync now
+            </button>
+          </div>
           <div className="field">
             <label className="field-label" htmlFor="notes">
               Notes to the coach
@@ -427,7 +635,9 @@ export function Week() {
                 workout={plan.workouts.find((w) => w.date === date) ?? null}
                 draft={draft}
                 busy={busy}
+                guard={guardByDate[date] ?? null}
                 onRegenerateDay={regenerateDay}
+                onRegenerateFromGuard={regenerateFromGuard}
               />
             ))}
           </div>

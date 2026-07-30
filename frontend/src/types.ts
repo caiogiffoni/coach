@@ -166,3 +166,28 @@ export interface PushReport {
   skipped_dates: SkippedDate[]
   errors: string[]
 }
+
+export interface SyncReport {
+  activities: number
+  daily_wellness: number
+  hrv: number
+  training_readiness: number
+  training_load: number
+  skipped_datasets: string[]
+  newest_date: string | null
+  needs_mfa: boolean
+}
+
+export interface IngestionStatus {
+  newest_date: string | null
+}
+
+export interface DayGuardResult {
+  date: string
+  recommendation: 'proceed' | 'swap' | 'veto'
+  reason: string
+  current_slot_type: string
+  suggested_slot_type: string | null
+  data_age_days: number
+  fatigue_reasons: string[]
+}

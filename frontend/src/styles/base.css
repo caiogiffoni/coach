@@ -233,6 +233,12 @@ ul {
   color: var(--danger);
 }
 
+.button-warning {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
 .button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -380,6 +386,25 @@ input[type='radio']:checked {
 
 .card + .card {
   margin-top: 16px;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.card-header-row .card-title {
+  margin-bottom: 0;
+}
+
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 /* --- Tables (13px, 36px rows, monospace right-aligned numbers) ------------ */
@@ -613,6 +638,18 @@ input[type='radio']:checked {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.day-card-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.day-card-alert .badge {
+  flex: none;
 }
 
 .day-card-toggle {
