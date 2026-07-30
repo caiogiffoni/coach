@@ -14,6 +14,7 @@ from ..profile.models import Profile
 from ..profile.seed import has_imported_data
 from .constraints import WeekConstraints, compute_constraints
 from .generator import generate_day, generate_week
+from .guard import DayGuardResult, check_day_guard
 from .plan_models import WeekPlan, Workout
 from .validator import GeneratedWeek, GeneratedWorkout, WorkoutStep
 
@@ -267,3 +268,24 @@ def list_week_plans(
             .order_by(WeekPlan.week_start.desc())
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Daily guard
+# ---------------------------------------------------------------------------
+
+
+@router.get("/guard", response_model=DayGuardResult)
+def get_day_guard(
+    week_start: date,
+    date: date,
+    days: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DayGuardResult:
+    """Check the stored workout for ``date`` against fresh fatigue data."""
+    profile = _profile_and_data(db, user)
+    try:
+        return check_day_guard(db, profile, week_start, date, _parse_days(days))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None

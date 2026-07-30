@@ -8,8 +8,9 @@ save/load methods (``client.dump`` / ``client.load``).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
@@ -22,6 +23,8 @@ from garminconnect import (
 )
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,26 @@ class GarminClient(Protocol):
 
         Each dict must contain at least ``workoutId`` and ``name``.
         """
+        ...
+
+    def get_activities(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch activities between ``start_date`` and ``end_date`` (inclusive)."""
+        ...
+
+    def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch daily wellness summaries (steps, RHR, stress, body battery)."""
+        ...
+
+    def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch HRV data for ``start_date`` to ``end_date`` (inclusive)."""
+        ...
+
+    def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch training readiness scores for the date range."""
+        ...
+
+    def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch training status / load data for the date range."""
         ...
 
 
@@ -156,6 +179,153 @@ class RealGarminClient(GarminClient):
         if self._client is None:
             raise RuntimeError("Not logged in to Garmin")
         return self._client
+
+    @staticmethod
+    def _date_range(start_date: date, end_date: date) -> list[date]:
+        days = (end_date - start_date).days
+        return [start_date + timedelta(days=i) for i in range(days + 1)]
+
+    def _call(self, name: str, *args, **kwargs):
+        """Call an underlying Garmin method, translating connection errors."""
+        client = self._ensure_logged_in()
+        method = getattr(client, name)
+        try:
+            return method(*args, **kwargs)
+        except GarminConnectConnectionError as exc:
+            raise RuntimeError(f"Garmin connection error: {exc}") from exc
+
+    def _call_per_date(
+        self,
+        method_name: str,
+        start_date: date,
+        end_date: date,
+        key: str | None = None,
+    ) -> list[dict]:
+        """Call a single-date read method for every date in the range.
+
+        Some Garmin endpoints return a dict keyed by ``calendarDate``; if
+        ``key`` is provided we unwrap that key, otherwise we treat the result
+        as a single row and inject ``calendarDate`` when missing.
+        """
+        client = self._ensure_logged_in()
+        if not hasattr(client, method_name):
+            logger.warning("Garmin method %s not available in this library version", method_name)
+            return []
+
+        rows: list[dict] = []
+        for day in self._date_range(start_date, end_date):
+            date_str = day.isoformat()
+            try:
+                result = self._call(method_name, date_str)
+            except (GarminConnectConnectionError, RuntimeError):
+                raise
+            except Exception as exc:  # noqa: BLE001 — best-effort read; don't crash sync
+                logger.warning("Garmin %s failed for %s: %s", method_name, date_str, exc)
+                continue
+
+            if result is None:
+                continue
+
+            if key:
+                payload = result.get(key) if isinstance(result, dict) else None
+                if isinstance(payload, dict):
+                    payload["calendarDate"] = payload.get("calendarDate", date_str)
+                    rows.append(payload)
+            elif isinstance(result, dict):
+                result["calendarDate"] = result.get("calendarDate", date_str)
+                rows.append(result)
+            elif isinstance(result, list):
+                for item in result:
+                    if isinstance(item, dict):
+                        item.setdefault("calendarDate", date_str)
+                rows.extend(result)
+        return rows
+
+    def get_activities(self, start_date: date, end_date: date) -> list[dict]:
+        client = self._ensure_logged_in()
+        method_name = "get_activities_by_date"
+        if not hasattr(client, method_name):
+            logger.warning("Garmin method %s not available; skipping activities", method_name)
+            return []
+        try:
+            return self._call(
+                method_name,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Garmin %s failed: %s", method_name, exc)
+            return []
+
+    def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
+        """Combine daily user summary with step data for the date range.
+
+        Uses ``get_user_summary(cdate)`` for the main wellness row and
+        ``get_daily_steps(start, end)`` for step details. Body-battery/stress
+        fields come from the summary where available.
+        """
+        client = self._ensure_logged_in()
+        summaries = []
+        # get_stats is the older compat name and tends to be the most stable
+        # source for RHR/steps; get_user_summary is the newer alias.
+        if hasattr(client, "get_stats"):
+            summaries = self._call_per_date("get_stats", start_date, end_date)
+        elif hasattr(client, "get_user_summary"):
+            summaries = self._call_per_date("get_user_summary", start_date, end_date)
+        else:
+            logger.warning("No daily wellness method available; skipping wellness")
+            return []
+
+        steps_by_date: dict[str, dict] = {}
+        if hasattr(client, "get_daily_steps"):
+            try:
+                steps = self._call("get_daily_steps", start_date.isoformat(), end_date.isoformat())
+                if isinstance(steps, list):
+                    for item in steps:
+                        if isinstance(item, dict) and item.get("calendarDate"):
+                            steps_by_date[item["calendarDate"]] = item
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Garmin get_daily_steps failed: %s", exc)
+
+        merged: list[dict] = []
+        for summary in summaries:
+            cal = summary.get("calendarDate")
+            if not cal:
+                continue
+            merged_row = dict(summary)
+            steps = steps_by_date.get(cal, {})
+            merged_row.update({k: v for k, v in steps.items() if v is not None})
+            merged.append(merged_row)
+        return merged
+
+    def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
+        return self._call_per_date("get_hrv_data", start_date, end_date)
+
+    def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
+        """Try the daily readiness endpoint; fall back to the morning report."""
+        client = self._ensure_logged_in()
+        if hasattr(client, "get_training_readiness"):
+            return self._call_per_date("get_training_readiness", start_date, end_date)
+        if hasattr(client, "get_morning_training_readiness"):
+            return self._call_per_date(
+                "get_morning_training_readiness", start_date, end_date, key="readiness"
+            )
+        logger.warning("No training readiness method available; skipping readiness")
+        return []
+
+    def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
+        """Read training status, which contains acute/chronic load and ACWR."""
+        rows = self._call_per_date("get_training_status", start_date, end_date)
+        # Garmin sometimes returns a nested dict under "trainingStatus".
+        flattened: list[dict] = []
+        for row in rows:
+            status = row.get("trainingStatus")
+            if isinstance(status, dict):
+                status.setdefault("calendarDate", row.get("calendarDate"))
+                flattened.append(status)
+            else:
+                flattened.append(row)
+        return flattened
 
     def schedule_workout(self, workout_json: dict, target_date: date) -> str:
         client = self._ensure_logged_in()
