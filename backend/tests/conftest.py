@@ -15,6 +15,13 @@ from app.main import app
 EXPORT = Path(__file__).resolve().parents[2] / "temp" / "garmin_info"
 
 
+def pytest_collection_modifyitems(config, items):
+    """Automatically mark tests that use the real-export ``imported`` fixture."""
+    for item in items:
+        if "imported" in getattr(item, "fixturenames", []):
+            item.add_marker(pytest.mark.realdata)
+
+
 def make_session():
     engine = create_engine(
         "sqlite:///:memory:",

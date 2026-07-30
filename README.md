@@ -92,6 +92,8 @@ cd backend && uv run pytest tests/ -q
 cd frontend && npm run build && npm run lint
 ```
 
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the backend tests (excluding the private real-data suite), builds the frontend, and builds the Docker image on every push/PR to `main`.
+
 ## Backlog (explicitly out of v1)
 
 - Workout editor UI (v1 is regenerate/reject only)
