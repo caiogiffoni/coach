@@ -45,7 +45,7 @@ pytestmark = pytest.mark.realdata
 
 
 def count(db, model) -> int:
-    return db.scalar(select(func.count()).select_from(model))
+    return int(db.scalar(select(func.count()).select_from(model)) or 0)
 
 
 # ---------------------------------------------------------------------------

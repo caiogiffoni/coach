@@ -44,7 +44,7 @@ def auth_status(db: Session = Depends(get_db)) -> StatusResponse:
 )
 def register(body: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
     user_count = db.scalar(select(func.count()).select_from(User))
-    if user_count > 0:
+    if user_count is not None and user_count > 0:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration is closed")
     user = User(email=body.email, password_hash=hash_password(body.password))
     db.add(user)

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from test_constraints import TARGET, build_db, make_profile, register
 
-from app.coaching.constraints import compute_constraints
+from app.coaching.constraints import WeekConstraints, compute_constraints
 from app.coaching.generator import (
     MAX_ATTEMPTS,
     fallback_week,
@@ -176,7 +176,7 @@ def data_client():
     db.close()
 
 
-def _constraints_for(db) -> "object":
+def _constraints_for(db) -> WeekConstraints:
     profile = db.scalar(select(Profile))
     return compute_constraints(db, profile, WEEK)
 

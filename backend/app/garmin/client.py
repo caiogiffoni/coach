@@ -254,11 +254,12 @@ class RealGarminClient(GarminClient):
             )
             return []
         try:
-            return self._call(
+            result: list[dict] = self._call(
                 method_name,
                 start_date.isoformat(),
                 end_date.isoformat(),
             )
+            return result
         except Exception as exc:  # noqa: BLE001
             logger.warning("Garmin %s failed: %s", method_name, exc)
             return []

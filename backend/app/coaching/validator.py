@@ -179,22 +179,22 @@ def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str
     # --- distances: per-workout, intensity budget, total volume ---
     total_km = quality_km = 0.0
     for workout in week.workouts:
-        slot = slots.get(workout.date)
-        if slot is None:
+        workout_slot = slots.get(workout.date)
+        if workout_slot is None:
             continue
-        distance = _workout_distance_km(workout, slot)
+        distance = _workout_distance_km(workout, workout_slot)
         if distance is None:
             continue  # no pace info anywhere — distance checks skipped
         total_km += distance
-        lo = slot.distance_km_lo * (1 - DISTANCE_TOLERANCE)
-        hi = slot.distance_km_hi * (1 + DISTANCE_TOLERANCE)
+        lo = workout_slot.distance_km_lo * (1 - DISTANCE_TOLERANCE)
+        hi = workout_slot.distance_km_hi * (1 + DISTANCE_TOLERANCE)
         if not (lo <= distance <= hi):
             errors.append(
                 f"{workout.date} '{workout.name}': ~{distance:.1f} km is outside "
-                f"the {slot.type} slot range {slot.distance_km_lo}-"
-                f"{slot.distance_km_hi} km"
+                f"the {workout_slot.type} slot range {workout_slot.distance_km_lo}-"
+                f"{workout_slot.distance_km_hi} km"
             )
-        if slot.type == "quality":
+        if workout_slot.type == "quality":
             quality_km += distance
     if quality_km > constraints.intensity_budget_km + SUM_TOLERANCE_KM:
         errors.append(
@@ -218,9 +218,9 @@ def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str
     # slots by design, so Z3 alone does not make a day hard.
     hard_dates = set()
     for workout in week.workouts:
-        slot = slots.get(workout.date)
+        slot_opt = slots.get(workout.date)
         smuggled = any(s.target_zone in ("Z4", "Z5") for s in workout.steps)
-        if (slot and slot.type == "quality") or smuggled:
+        if (slot_opt and slot_opt.type == "quality") or smuggled:
             hard_dates.add(workout.date)
     if len(hard_dates) > 2:
         errors.append(

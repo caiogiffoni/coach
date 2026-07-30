@@ -26,7 +26,7 @@ changed:
 
 from datetime import date, timedelta
 from statistics import median
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -206,8 +206,11 @@ def _weekly_volumes(
     )
     by_monday: dict[date, float] = {}
     for run in runs:
-        monday = _iso_monday(run.start_time_local.date())
-        by_monday[monday] = by_monday.get(monday, 0.0) + run.distance_km
+        start = run.start_time_local
+        distance = run.distance_km
+        assert start is not None and distance is not None
+        monday = _iso_monday(start.date())
+        by_monday[monday] = by_monday.get(monday, 0.0) + distance
     return [
         WeeklyVolume(
             week_start=first_monday + timedelta(weeks=i),
@@ -266,11 +269,13 @@ def _training_state(db: Session, profile: Profile) -> TrainingState:
                 Activity.start_time_local >= cutoff,
             )
         )
-        hard_dates = [
-            r.start_time_local.date()
-            for r in recent
-            if _is_hard_run(r, profile.threshold_hr)
-        ]
+        hard_dates = []
+        for r in recent:
+            start = r.start_time_local
+            if start is None:
+                continue
+            if _is_hard_run(r, profile.threshold_hr):
+                hard_dates.append(start.date())
         if hard_dates:
             days_since_last_hard = (as_of - max(hard_dates)).days
 
@@ -300,9 +305,10 @@ def _training_state(db: Session, profile: Profile) -> TrainingState:
             )
             .order_by(DailyWellness.calendar_date)
         ).all()
-        if rows:
-            resting_hr_baseline = median(rows)
-            resting_hr_latest = rows[-1]
+        resting_hr_values = [v for v in rows if v is not None]
+        if resting_hr_values:
+            resting_hr_baseline = median(resting_hr_values)
+            resting_hr_latest = resting_hr_values[-1]
 
     sleep_hours = sleep_score = None
     nights = db.scalars(
@@ -471,7 +477,7 @@ def _session_roles(n: int, quality_allowed: bool) -> list[SessionType]:
         )
     if not quality_allowed:
         roles = ["aerobic" if r == "quality" else r for r in roles]
-    return roles
+    return cast(list[SessionType], roles)
 
 
 def _enforce_hard_spacing(roles: list[SessionType], days: list[date]) -> list[str]:

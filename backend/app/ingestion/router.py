@@ -183,13 +183,13 @@ def _save_upload(upload: UploadFile, dest: Path) -> None:
             f.write(chunk)
 
 
-@router.post("/sync")
+@router.post("/sync", response_model=None)
 def sync_garmin(
     body: SyncRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     client: GarminClient = Depends(garmin_client_or_raise),
-) -> SyncReport:
+) -> SyncReport | JSONResponse:
     """Pull recent data from Garmin Connect and upsert into the local store."""
     report = sync_garmin_data(db, client, days_back=body.days)
     if report.needs_mfa:

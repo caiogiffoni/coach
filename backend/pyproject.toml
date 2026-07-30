@@ -21,6 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=2.3.0",
     "pytest>=9.1.1",
     "ruff>=0.16.1",
 ]
@@ -39,3 +40,13 @@ ignore = ["E501"]  # line length handled by formatter
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["migrations"]
+plugins = ["pydantic.mypy"]
+show_error_codes = true

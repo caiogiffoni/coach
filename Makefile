@@ -1,4 +1,4 @@
-.PHONY: backend frontend dev install docker test test-backend test-frontend lint-backend format-backend build clean
+.PHONY: backend frontend dev install docker test test-backend test-frontend lint-backend format-backend type-check-backend build clean
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8003
@@ -31,6 +31,9 @@ lint-backend:
 
 format-backend:
 	cd backend && uv run ruff format app tests && uv run ruff check --fix app tests
+
+type-check-backend:
+	cd backend && uv run mypy app tests
 
 build:
 	cd frontend && npm run build

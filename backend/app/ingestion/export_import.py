@@ -117,16 +117,17 @@ def _glob_sorted(base: Path, pattern: str) -> list[Path]:
 
 def _upsert_many(
     db: Session,
-    model: type,
+    model: type[Any],
     key_fields: tuple[str, ...],
-    rows: Iterable[dict],
+    rows: Iterable[dict[str, Any]],
 ) -> int:
     """Insert or update rows keyed by key_fields. Returns rows processed."""
     rows = list(rows)
     if not rows:
         return 0
-    existing = {}
-    for obj in db.scalars(select(model)):
+    existing: dict[tuple[Any, ...], Any] = {}
+    for raw_obj in db.scalars(select(model)):
+        obj: Any = raw_obj
         existing[tuple(getattr(obj, k) for k in key_fields)] = obj
     count = 0
     for row in rows:
@@ -200,7 +201,9 @@ def _load_daily_wellness(base: Path) -> list[dict]:
                 continue
             stress = record.get("allDayStress") or {}
             agg_list = stress.get("aggregatorList") or []
-            total = next((a for a in agg_list if a.get("type") == "TOTAL"), {})
+            total: dict[str, Any] = next(
+                (a for a in agg_list if a.get("type") == "TOTAL"), {}
+            )
             bb = record.get("bodyBattery") or {}
             stat_map = {
                 s["bodyBatteryStatType"]: s["statsValue"]

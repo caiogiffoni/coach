@@ -7,6 +7,7 @@ no real Garmin API calls are made.
 from datetime import date, timedelta
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -121,6 +122,21 @@ class FakeGarminClient(GarminClient):
         if not self.is_logged_in():
             raise RuntimeError("Not logged in")
         return list(self.scheduled.get(target_date, []))
+
+    def get_activities(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
+        return []
 
 
 def make_approved_week(db, user_id: int, week_start: date) -> WeekPlan:
@@ -266,7 +282,7 @@ def test_push_draft_week_raises_409():
     db.commit()
     fake = FakeGarminClient()
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         push_week(WEEK, user, db, fake)
     assert exc_info.value.status_code == 409
 
@@ -279,7 +295,7 @@ def test_push_when_not_logged_in_raises_401():
     make_approved_week(db, user.id, WEEK)
     fake = FakeGarminClient(logged_in=False)
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         push_week(WEEK, user, db, fake)
     assert exc_info.value.status_code == 401
 

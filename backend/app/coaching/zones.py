@@ -104,8 +104,8 @@ def threshold_pace_from_race(distance_km: float, time_sec: int) -> int:
     Riegel to a 10K-equivalent time, then +3% from ~10K race pace to
     threshold pace. E.g. 17:43 5K → ~228 s/km (3:48/km).
     """
-    t10k_sec = time_sec * (10.0 / distance_km) ** RIEGEL_EXPONENT
-    return round(t10k_sec / 10.0 * 1.03)
+    t10k_sec = float(time_sec) * (10.0 / distance_km) ** RIEGEL_EXPONENT
+    return int(round(t10k_sec / 10.0 * 1.03))
 
 
 def pace_zones(threshold_pace_sec_per_km: int) -> list[PaceZone]:

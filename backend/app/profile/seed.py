@@ -40,7 +40,7 @@ _THRESHOLD_HR_RANGE = (165, 176)
 _MODERATE_HR_RANGE = (155, 165)
 
 
-def _latest_run_date(db: Session):
+def _latest_run_date(db: Session) -> datetime | None:
     return db.scalar(
         select(func.max(Activity.start_time_local)).where(
             Activity.activity_type.in_(RUN_TYPES)
@@ -104,8 +104,11 @@ def _seed_weekly_volume_km(db: Session) -> float | None:
         return None
     weekly: dict[tuple[int, int], float] = {}
     for run in runs:
-        year, week, _ = run.start_time_local.isocalendar()
-        weekly[(year, week)] = weekly.get((year, week), 0.0) + run.distance_km
+        start = run.start_time_local
+        distance = run.distance_km
+        assert start is not None and distance is not None
+        year, week, _ = start.isocalendar()
+        weekly[(year, week)] = weekly.get((year, week), 0.0) + distance
     return round(sum(weekly.values()) / len(weekly), 2)
 
 
@@ -120,7 +123,9 @@ def _seed_recent_race(db: Session) -> tuple[float, int] | None:
     races = [p for p in prs if p.record_type in RACE_DISTANCES_KM and p.value]
     if not races:
         return None
-    latest = max(races, key=lambda p: p.pr_start_time_gmt)
+    latest = max(races, key=lambda p: p.pr_start_time_gmt or datetime.min)
+    assert latest.record_type is not None
+    assert latest.value is not None
     return RACE_DISTANCES_KM[latest.record_type], int(latest.value)
 
 
@@ -133,11 +138,16 @@ def _seed_threshold_pace(db: Session) -> int | None:
     runs = [r for r in _recent_runs(db, days=120) if r.avg_hr is not None]
 
     def mean_pace(hr_lo: int, hr_hi: int) -> float | None:
-        paces = [
-            r.duration_min * 60 / r.distance_km
-            for r in runs
-            if hr_lo <= r.avg_hr < hr_hi
-        ]
+        paces: list[float] = []
+        for r in runs:
+            avg_hr = r.avg_hr
+            distance = r.distance_km
+            if avg_hr is None or distance is None:
+                continue
+            duration = r.duration_min
+            assert duration is not None
+            if hr_lo <= avg_hr < hr_hi:
+                paces.append(duration * 60 / distance)
         return sum(paces) / len(paces) if paces else None
 
     pace = mean_pace(*_THRESHOLD_HR_RANGE) or mean_pace(*_MODERATE_HR_RANGE)
@@ -152,7 +162,9 @@ def _seed_preferred_days(db: Session) -> list[int]:
     """
     counts: dict[int, int] = {}
     for run in _recent_runs(db, days=120):
-        day = run.start_time_local.weekday()
+        start = run.start_time_local
+        assert start is not None
+        day = start.weekday()
         counts[day] = counts.get(day, 0) + 1
     if not counts:
         return []

@@ -112,7 +112,7 @@ def _register(client: TestClient) -> str:
         json={"email": "caio@example.com", "password": "secret123"},
     )
     assert resp.status_code == 201
-    return resp.json()["token"]
+    return str(resp.json()["token"])
 
 
 # ---------------------------------------------------------------------------

@@ -79,7 +79,8 @@ def add_weekly_volume(db, monday: date, km: float):
 def build_db(volumes: list[float] | None = None):
     """Synthetic DB with `volumes` km in the weeks before TARGET (oldest first)."""
     db = make_session()
-    for i, km in enumerate(volumes or []):
+    volumes = volumes or []
+    for i, km in enumerate(volumes):
         monday = TARGET - timedelta(weeks=len(volumes) - i)
         add_weekly_volume(db, monday, km)
     db.commit()
