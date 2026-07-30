@@ -25,10 +25,31 @@ npm install
 npm run dev
 ```
 
+Or use the Makefile targets in two terminals:
+
+```bash
+# Terminal 1
+make backend
+
+# Terminal 2
+make frontend
+```
+
 The Vite dev proxy forwards `/api` to `http://localhost:8000`. If port 8000 is already in use, start the backend on another port (e.g. `--port 8001`) and run the frontend with:
 
 ```bash
 API_PROXY_TARGET=http://localhost:8001 npm run dev
+```
+
+Other useful targets:
+
+```bash
+make install        # uv sync + npm install
+make test           # all tests + frontend build/lint
+make test-backend   # backend pytest only
+make test-frontend  # frontend build + lint only
+make build          # frontend production build
+make docker         # docker compose up --build
 ```
 
 ### First-run flow
