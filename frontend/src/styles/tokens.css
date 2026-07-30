@@ -1,0 +1,53 @@
+/* Design tokens — implements STYLE_GUIDE.md token tables exactly.
+   Light on :root, dark on [data-theme="dark"]. Components must reference
+   tokens, never raw hex. */
+
+:root {
+  /* Neutrals */
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --surface-2: #f2f2ef;
+  --border: #e2e2dc;
+  --text: #1b1d21;
+  --text-muted: #5f6368;
+
+  /* Accent (deep blue) */
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-contrast: #ffffff;
+  --accent-subtle: #e8eefa;
+
+  /* Semantic status */
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #b91c1c;
+
+  /* Training zones (functional, theme-independent) */
+  --z1: #9ca3af;
+  --z2: #0d9488;
+  --z3: #65a30d;
+  --z4: #d97706;
+  --z5: #dc2626;
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #121417;
+  --surface: #1a1d21;
+  --surface-2: #22262b;
+  --border: #31363d;
+  --text: #e8e9eb;
+  --text-muted: #9ba1a8;
+
+  --accent: #6c9bf5;
+  --accent-hover: #8ab1f8;
+  --accent-contrast: #0f1524;
+  --accent-subtle: #1b2a45;
+
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+
+  color-scheme: dark;
+}
