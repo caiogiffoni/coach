@@ -182,6 +182,18 @@ export interface IngestionStatus {
   newest_date: string | null
 }
 
+export interface FileResult {
+  filename: string
+  status: 'ok' | 'error'
+  detail: string | null
+  counts: ImportReport | null
+}
+
+export interface UploadReport {
+  files: FileResult[]
+  totals: ImportReport
+}
+
 export interface DayGuardResult {
   date: string
   recommendation: 'proceed' | 'swap' | 'veto'

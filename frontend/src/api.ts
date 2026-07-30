@@ -15,6 +15,7 @@ import type {
   PushReport,
   SyncReport,
   TokenResponse,
+  UploadReport,
   UserResponse,
   WeekPlan,
   WeekPlanSummary,
@@ -127,8 +128,54 @@ export const ingestion = {
   status: () => request<IngestionStatus>('/ingestion/status'),
   import: (path: string) =>
     request<ImportReport>('/ingestion/import', { method: 'POST', body: { path } }),
+  upload: async (files: FileList) => {
+    const form = new FormData()
+    for (let i = 0; i < files.length; i++) {
+      form.append('files', files[i])
+    }
+    const headers: Record<string, string> = {}
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch('/api/ingestion/upload', {
+      method: 'POST',
+      headers,
+      body: form,
+    })
+    return handleResponse<UploadReport>(res)
+  },
   sync: (days = 14) =>
     request<SyncReport>('/ingestion/sync', { method: 'POST', body: { days } }),
+}
+
+async function handleResponse<T>(res: Response): Promise<T> {
+  let errorData: unknown = null
+  if (!res.ok) {
+    errorData = await res.json().catch(() => null)
+  }
+
+  if (res.status === 401 && getToken()) {
+    const data = errorData as { needs_mfa?: boolean } | null
+    if (data?.needs_mfa) {
+      throw new ApiError(401, JSON.stringify(data))
+    }
+    clearToken()
+    window.location.assign('/login')
+    throw new ApiError(401, 'Session expired')
+  }
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`
+    const data = errorData as { detail?: string | Array<{ msg?: string }> } | null
+    if (typeof data?.detail === 'string') {
+      message = data.detail
+    } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
+      message = data.detail.map((e) => e.msg ?? '').join('; ')
+    }
+    throw new ApiError(res.status, message)
+  }
+
+  return (await res.json()) as T
 }
 
 // --- Coaching -----------------------------------------------------------------

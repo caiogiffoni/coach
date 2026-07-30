@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError, ingestion } from '../api'
-import type { ImportReport } from '../types'
+import type { ImportReport, UploadReport } from '../types'
 
 const DATASET_LABELS: [keyof ImportReport, string][] = [
   ['activities', 'Activities'],
@@ -23,6 +23,12 @@ export function Data() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const [uploadReport, setUploadReport] = useState<UploadReport | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -37,6 +43,41 @@ export function Data() {
     }
   }
 
+  async function doUpload(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setUploadError(null)
+    setUploadReport(null)
+    setUploadBusy(true)
+    try {
+      setUploadReport(await ingestion.upload(files))
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : 'Upload failed')
+    } finally {
+      setUploadBusy(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const onDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }, [])
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragActive(false)
+      void doUpload(e.dataTransfer.files)
+    },
+    []
+  )
+
   const total = report
     ? DATASET_LABELS.reduce((sum, [key]) => sum + report[key], 0)
     : 0
@@ -46,6 +87,99 @@ export function Data() {
       <div className="page-header">
         <h1>Data</h1>
       </div>
+
+      <section className="section">
+        <div
+          className={`card drop-zone${dragActive ? ' drop-active' : ''}`}
+          onDragEnter={onDrag}
+          onDragOver={onDrag}
+          onDragLeave={onDrag}
+          onDrop={onDrop}
+        >
+          <h2 className="card-title">Upload files</h2>
+          <p className="field-hint">
+            Drop Garmin GDPR export <code>.zip</code> and/or activity{' '}
+            <code>.fit</code> files here, or click to browse.
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip,.fit,.FIT"
+            multiple
+            onChange={(e) => void doUpload(e.target.files)}
+            style={{ display: 'none' }}
+          />
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={uploadBusy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Choose files
+            </button>
+          </div>
+          {uploadError && (
+            <div className="banner banner-danger" role="alert">
+              {uploadError}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {uploadReport && (
+        <section className="section">
+          <div className="card">
+            <h2 className="card-title">Upload report</h2>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Status</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadReport.files.map((file) => (
+                  <tr key={file.filename}>
+                    <td>{file.filename}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          file.status === 'ok' ? 'badge-success' : 'badge-danger'
+                        }`}
+                      >
+                        {file.status}
+                      </span>
+                    </td>
+                    <td>
+                      {file.detail
+                        ? file.detail
+                        : file.counts
+                          ? `${file.counts.activities} activities`
+                          : '—'}
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <td>
+                    <strong>Total</strong>
+                  </td>
+                  <td colSpan={2}>
+                    <strong>
+                      {DATASET_LABELS.reduce(
+                        (sum, [key]) => sum + uploadReport.totals[key],
+                        0
+                      )}{' '}
+                      rows
+                    </strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="section">
         <form className="card" onSubmit={onSubmit}>

@@ -730,3 +730,17 @@ input[type='radio']:checked {
   width: 100%;
   max-width: 360px;
 }
+
+/* --- Drop zone ------------------------------------------------------------- */
+
+.drop-zone {
+  border-style: dashed;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.drop-zone:hover,
+.drop-zone.drop-active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
