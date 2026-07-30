@@ -10,7 +10,7 @@ AI running coach → Garmin Connect. Web app that generates weekly running worko
 - [ ] 4. Constraint engine (port plan_week state)
 - [ ] 5. LLM generation + validator
 - [ ] 6. Frontend v1 (login, profile, generate, review)
-- [ ] 7. Garmin push (client, mapper, idempotent push)
+- [x] 7. Garmin push (client, mapper, idempotent push)
 - [ ] 8. Auto-pull + daily guard
 - [ ] 9. Manual upload endpoint (FIT/zip)
 - [ ] 10. End-to-end hardening

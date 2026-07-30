@@ -4,10 +4,13 @@
 
 import type {
   AuthStatus,
+  GarminStatus,
   GenerateWeekRequest,
   ImportReport,
+  LoginResult,
   Profile,
   ProfileUpdate,
+  PushReport,
   TokenResponse,
   UserResponse,
   WeekPlan,
@@ -125,4 +128,17 @@ export const coaching = {
 export const ingestion = {
   import: (path: string) =>
     request<ImportReport>('/ingestion/import', { method: 'POST', body: { path } }),
+}
+
+// --- Garmin -------------------------------------------------------------------
+
+export const garmin = {
+  status: () => request<GarminStatus>('/garmin/status'),
+  login: (mfa_code?: string) =>
+    request<LoginResult>('/garmin/login', {
+      method: 'POST',
+      body: { mfa_code: mfa_code ?? null },
+    }),
+  push: (week_start: string) =>
+    request<PushReport>(`/garmin/push?week_start=${week_start}`, { method: 'POST' }),
 }

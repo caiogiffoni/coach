@@ -143,3 +143,26 @@ export interface ImportReport {
   personal_records: number
   biometric_profile: number
 }
+
+export interface LoginResult {
+  success: boolean
+  needs_mfa: boolean
+  message: string
+}
+
+export interface GarminStatus {
+  configured: boolean
+  logged_in: boolean
+  message: string
+}
+
+export interface SkippedDate {
+  date: string
+  reason: string
+}
+
+export interface PushReport {
+  pushed_dates: string[]
+  skipped_dates: SkippedDate[]
+  errors: string[]
+}
