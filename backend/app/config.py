@@ -9,7 +9,7 @@ DATA_DIR = BASE_DIR / "data"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", extra="ignore")
 
-    secret_key: str = "dev-secret-change-me"
+    secret_key: str = "dev-secret-change-me-before-using-in-production"
     database_url: str = f"sqlite:///{DATA_DIR / 'coach.db'}"
     token_expire_hours: int = 24 * 7
 
