@@ -142,7 +142,9 @@ def _to_generated(plan: WeekPlan) -> GeneratedWeek:
     )
 
 
-def _replace_workouts(plan: WeekPlan, week: GeneratedWeek, constraints: WeekConstraints):
+def _replace_workouts(
+    plan: WeekPlan, week: GeneratedWeek, constraints: WeekConstraints
+):
     """Swap the plan's Workout rows for `week`'s (same session/transaction)."""
     slots = {s.date: s for s in constraints.sessions}
     plan.workouts.clear()
@@ -182,16 +184,16 @@ def generate_week_plan(
                 status.HTTP_404_NOT_FOUND,
                 "No plan for this week — generate the week first",
             )
-        slot = next(
-            (s for s in constraints.sessions if s.date == body.day_date), None
-        )
+        slot = next((s for s in constraints.sessions if s.date == body.day_date), None)
         if slot is None:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 f"No session slot on {body.day_date} for this week",
             )
         notes = body.notes if body.notes is not None else plan.notes
-        result = generate_day(slot, constraints, profile, notes, llm, _to_generated(plan))
+        result = generate_day(
+            slot, constraints, profile, notes, llm, _to_generated(plan)
+        )
         _replace_workouts(plan, result.week, constraints)
         plan.notes = notes
         plan.validation_errors = result.errors

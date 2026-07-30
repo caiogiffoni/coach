@@ -52,8 +52,13 @@ def _hr_zone_target(zone_label: str) -> dict:
     }
 
 
-def _step(step_order: int, step_type_id: int, step_type_key: str,
-          duration_seconds: float, target: dict) -> dict:
+def _step(
+    step_order: int,
+    step_type_id: int,
+    step_type_key: str,
+    duration_seconds: float,
+    target: dict,
+) -> dict:
     return {
         "type": "ExecutableStepDTO",
         "stepId": None,

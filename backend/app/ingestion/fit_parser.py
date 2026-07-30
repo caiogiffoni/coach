@@ -96,7 +96,9 @@ def _parse_session(session: Any) -> dict:
         "calories": calories,
         "vo2max_value": None,
         "aerobic_training_effect": _get_field(session, "total_training_effect"),
-        "anaerobic_training_effect": _get_field(session, "total_anaerobic_training_effect"),
+        "anaerobic_training_effect": _get_field(
+            session, "total_anaerobic_training_effect"
+        ),
         "training_load": _get_field(session, "training_stress_score"),
         "lap_count": _get_field(session, "num_laps"),
         "is_pr": None,

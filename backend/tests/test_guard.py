@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.coaching.constraints import compute_constraints
 from app.coaching.guard import check_day_guard
 from app.coaching.plan_models import WeekPlan, Workout
 from app.db import Base, get_db
@@ -265,7 +264,9 @@ def test_guard_data_age_days():
 
     result = check_day_guard(db, profile, WEEK_START, wednesday)
 
-    assert result.data_age_days == 3  # seed runs push latest to May 31, target is Wed Jun 3
+    assert (
+        result.data_age_days == 3
+    )  # seed runs push latest to May 31, target is Wed Jun 3
     assert result.recommendation == "proceed"
 
 
@@ -283,7 +284,7 @@ def test_guard_endpoint_requires_auth(guard_test):
 def test_guard_endpoint_veto(guard_test):
     client, db, headers = guard_test
     user = db.scalar(select(User))
-    profile = seed_profile_and_data(db, user.id)
+    _ = seed_profile_and_data(db, user.id)
 
     for i in range(9, 0, -1):
         db.add(DailyWellness(calendar_date=TODAY - timedelta(days=i), resting_hr=47))

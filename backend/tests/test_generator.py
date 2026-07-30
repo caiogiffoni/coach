@@ -6,12 +6,11 @@ dependency override) — no test touches a real API. Endpoint tests run
 against the real export import + a seeded profile (conftest fixtures).
 """
 
-
 import json
 from datetime import date, timedelta
 
-
 import pytest
+from conftest import EXPORT, make_session
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from test_constraints import TARGET, build_db, make_profile, register
@@ -30,12 +29,12 @@ from app.ingestion.export_import import import_export
 from app.llm.client import get_llm_client
 from app.main import app
 from app.profile.models import Profile
-from conftest import EXPORT, make_session
 
 WEEK = date(2026, 5, 11)  # Monday, used by the endpoint tests
 
 
 pytestmark = pytest.mark.realdata
+
 
 class FakeLLM:
     """Canned responses in order; records prompts; 'garbage' when exhausted."""

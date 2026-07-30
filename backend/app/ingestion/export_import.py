@@ -158,27 +158,35 @@ def _load_activities(base: Path) -> list[dict]:
                 duration = a.get("duration")
                 distance = a.get("distance")
                 elevation = a.get("elevationGain")
-                rows.append({
-                    "activity_id": a["activityId"],
-                    "name": a.get("name"),
-                    "activity_type": a.get("activityType"),
-                    "sport_type": a.get("sportType"),
-                    "start_time_gmt": _ms_to_dt(a.get("startTimeGmt")),
-                    "start_time_local": _ms_to_dt(a.get("startTimeLocal")),
-                    "duration_min": duration / 60_000 if duration is not None else None,
-                    "distance_km": distance / 100_000 if distance is not None else None,
-                    "elevation_gain_m": elevation / 100 if elevation is not None else None,
-                    "avg_hr": a.get("avgHr"),
-                    "max_hr": a.get("maxHr"),
-                    "min_hr": a.get("minHr"),
-                    "calories": a.get("calories"),
-                    "vo2max_value": a.get("vO2MaxValue"),
-                    "aerobic_training_effect": a.get("aerobicTrainingEffect"),
-                    "anaerobic_training_effect": a.get("anaerobicTrainingEffect"),
-                    "training_load": a.get("activityTrainingLoad"),
-                    "lap_count": a.get("lapCount"),
-                    "is_pr": a.get("pr"),
-                })
+                rows.append(
+                    {
+                        "activity_id": a["activityId"],
+                        "name": a.get("name"),
+                        "activity_type": a.get("activityType"),
+                        "sport_type": a.get("sportType"),
+                        "start_time_gmt": _ms_to_dt(a.get("startTimeGmt")),
+                        "start_time_local": _ms_to_dt(a.get("startTimeLocal")),
+                        "duration_min": duration / 60_000
+                        if duration is not None
+                        else None,
+                        "distance_km": distance / 100_000
+                        if distance is not None
+                        else None,
+                        "elevation_gain_m": elevation / 100
+                        if elevation is not None
+                        else None,
+                        "avg_hr": a.get("avgHr"),
+                        "max_hr": a.get("maxHr"),
+                        "min_hr": a.get("minHr"),
+                        "calories": a.get("calories"),
+                        "vo2max_value": a.get("vO2MaxValue"),
+                        "aerobic_training_effect": a.get("aerobicTrainingEffect"),
+                        "anaerobic_training_effect": a.get("anaerobicTrainingEffect"),
+                        "training_load": a.get("activityTrainingLoad"),
+                        "lap_count": a.get("lapCount"),
+                        "is_pr": a.get("pr"),
+                    }
+                )
     return rows
 
 
@@ -277,17 +285,19 @@ def _load_hrv(base: Path) -> list[dict]:
             sdrr = summary.get("SDRR_HRV", {}).get("avgValue")
             if cal is None or (rmssd is None and sdrr is None):
                 continue
-            rows.append({
-                "calendar_date": cal,
-                "source": "snapshot",
-                "snapshot_time": rec.get("snapshotTimeOfDayType") or "",
-                "rmssd": rmssd,
-                "sdrr": sdrr,
-                "hrv_status": None,
-                "hrv_pct": None,
-                "baseline_lo": None,
-                "baseline_hi": None,
-            })
+            rows.append(
+                {
+                    "calendar_date": cal,
+                    "source": "snapshot",
+                    "snapshot_time": rec.get("snapshotTimeOfDayType") or "",
+                    "rmssd": rmssd,
+                    "sdrr": sdrr,
+                    "hrv_status": None,
+                    "hrv_pct": None,
+                    "baseline_lo": None,
+                    "baseline_hi": None,
+                }
+            )
 
     # Daily health status (Sep 2025+)
     for f in _glob_sorted(base, f"{WELLNESS}/*_healthStatusData.json"):
@@ -297,17 +307,19 @@ def _load_hrv(base: Path) -> list[dict]:
             hrv = metrics.get("HRV", {})
             if cal is None or not hrv.get("value"):
                 continue
-            rows.append({
-                "calendar_date": cal,
-                "source": "daily",
-                "snapshot_time": "",
-                "rmssd": hrv.get("value"),
-                "sdrr": None,
-                "hrv_status": hrv.get("status"),
-                "hrv_pct": hrv.get("percentage"),
-                "baseline_lo": hrv.get("baselineLowerLimit"),
-                "baseline_hi": hrv.get("baselineUpperLimit"),
-            })
+            rows.append(
+                {
+                    "calendar_date": cal,
+                    "source": "daily",
+                    "snapshot_time": "",
+                    "rmssd": hrv.get("value"),
+                    "sdrr": None,
+                    "hrv_status": hrv.get("status"),
+                    "hrv_pct": hrv.get("percentage"),
+                    "baseline_lo": hrv.get("baselineLowerLimit"),
+                    "baseline_hi": hrv.get("baselineUpperLimit"),
+                }
+            )
 
     rows.sort(key=lambda r: (r["calendar_date"], r["source"], r["snapshot_time"]))
     return rows
@@ -317,24 +329,28 @@ def _load_vo2max(base: Path) -> list[dict]:
     rows = []
     for f in _glob_sorted(base, f"{METRICS}/ActivityVo2Max_*.json"):
         for rec in _read_json(f):
-            rows.append({
-                "calendar_date": _parse_date(rec.get("calendarDate")),
-                "sport": rec.get("sport"),
-                "vo2max_value": rec.get("vo2MaxValue"),
-                "max_met": None,
-                "activity_id": rec.get("activityId"),
-                "source": "activity",
-            })
+            rows.append(
+                {
+                    "calendar_date": _parse_date(rec.get("calendarDate")),
+                    "sport": rec.get("sport"),
+                    "vo2max_value": rec.get("vo2MaxValue"),
+                    "max_met": None,
+                    "activity_id": rec.get("activityId"),
+                    "source": "activity",
+                }
+            )
     for f in _glob_sorted(base, f"{METRICS}/MetricsMaxMetData_*.json"):
         for rec in _read_json(f):
-            rows.append({
-                "calendar_date": _parse_date(rec.get("calendarDate")),
-                "sport": rec.get("sport"),
-                "vo2max_value": rec.get("vo2MaxValue"),
-                "max_met": rec.get("maxMet"),
-                "activity_id": None,
-                "source": "metrics",
-            })
+            rows.append(
+                {
+                    "calendar_date": _parse_date(rec.get("calendarDate")),
+                    "sport": rec.get("sport"),
+                    "vo2max_value": rec.get("vo2MaxValue"),
+                    "max_met": rec.get("maxMet"),
+                    "activity_id": None,
+                    "source": "metrics",
+                }
+            )
     # Dedupe per (date, sport), preferring the "metrics" source on ties
     rows = [r for r in rows if r["calendar_date"] is not None]
     rows.sort(key=lambda r: (r["calendar_date"], r["source"]))
@@ -419,14 +435,16 @@ def _load_personal_records(base: Path) -> list[dict]:
             for pr in chunk.get("personalRecords", []):
                 if pr.get("personalRecordId") is None:
                     continue
-                rows.append({
-                    "personal_record_id": pr["personalRecordId"],
-                    "record_type": pr.get("personalRecordType"),
-                    "value": pr.get("value"),
-                    "pr_start_time_gmt": _parse_pr_date(pr.get("prStartTimeGMT")),
-                    "activity_id": pr.get("activityId"),
-                    "current": pr.get("current"),
-                })
+                rows.append(
+                    {
+                        "personal_record_id": pr["personalRecordId"],
+                        "record_type": pr.get("personalRecordType"),
+                        "value": pr.get("value"),
+                        "pr_start_time_gmt": _parse_pr_date(pr.get("prStartTimeGMT")),
+                        "activity_id": pr.get("activityId"),
+                        "current": pr.get("current"),
+                    }
+                )
     return rows
 
 
@@ -466,7 +484,9 @@ def _find_export_root(path: Path) -> Path:
 
 def _import_from_root(base: Path, db: Session) -> ImportReport:
     report = ImportReport()
-    report.activities = _upsert_many(db, Activity, ("activity_id",), _load_activities(base))
+    report.activities = _upsert_many(
+        db, Activity, ("activity_id",), _load_activities(base)
+    )
     report.daily_wellness = _upsert_many(
         db, DailyWellness, ("calendar_date",), _load_daily_wellness(base)
     )
@@ -474,7 +494,9 @@ def _import_from_root(base: Path, db: Session) -> ImportReport:
     report.hrv = _upsert_many(
         db, Hrv, ("calendar_date", "source", "snapshot_time"), _load_hrv(base)
     )
-    report.vo2max = _upsert_many(db, Vo2Max, ("calendar_date", "sport"), _load_vo2max(base))
+    report.vo2max = _upsert_many(
+        db, Vo2Max, ("calendar_date", "sport"), _load_vo2max(base)
+    )
     report.race_predictions = _upsert_many(
         db, RacePrediction, ("calendar_date",), _load_race_predictions(base)
     )

@@ -74,7 +74,9 @@ def import_garmin_export(
     except FileNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
     except (ValueError, KeyError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid export: {exc}") from None
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Invalid export: {exc}"
+        ) from None
 
 
 @router.post("/upload", response_model=UploadReport)
@@ -141,9 +143,13 @@ def _process_zip(
     except FileNotFoundError as exc:
         return FileResult(filename=filename, status="error", detail=str(exc))
     except (ValueError, KeyError, zipfile.BadZipFile) as exc:
-        return FileResult(filename=filename, status="error", detail=f"Invalid zip: {exc}")
+        return FileResult(
+            filename=filename, status="error", detail=f"Invalid zip: {exc}"
+        )
     except Exception as exc:  # noqa: BLE001
-        return FileResult(filename=filename, status="error", detail=f"Import failed: {exc}")
+        return FileResult(
+            filename=filename, status="error", detail=f"Import failed: {exc}"
+        )
 
 
 def _process_fit(
@@ -166,7 +172,9 @@ def _process_fit(
         return FileResult(filename=filename, status="error", detail=str(exc))
     except Exception as exc:  # noqa: BLE001
         db.rollback()
-        return FileResult(filename=filename, status="error", detail=f"FIT parse failed: {exc}")
+        return FileResult(
+            filename=filename, status="error", detail=f"FIT parse failed: {exc}"
+        )
 
 
 def _save_upload(upload: UploadFile, dest: Path) -> None:

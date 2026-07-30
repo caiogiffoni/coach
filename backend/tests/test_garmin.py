@@ -220,9 +220,7 @@ def test_repush_deletes_old_workouts_and_replaces_mappings():
     fake = FakeGarminClient()
 
     push_week(WEEK, user, db, fake)
-    old_ids = {
-        m.garmin_workout_id for m in db.scalars(select(GarminWorkoutMapping))
-    }
+    old_ids = {m.garmin_workout_id for m in db.scalars(select(GarminWorkoutMapping))}
 
     # Re-approve is not allowed, so reset status manually for the idempotency test.
     plan.status = "approved"
@@ -233,9 +231,7 @@ def test_repush_deletes_old_workouts_and_replaces_mappings():
     report = push_week(WEEK, user, db, fake)
 
     assert sorted(report.pushed_dates) == [str(WEEK), str(WEEK + timedelta(days=2))]
-    new_ids = {
-        m.garmin_workout_id for m in db.scalars(select(GarminWorkoutMapping))
-    }
+    new_ids = {m.garmin_workout_id for m in db.scalars(select(GarminWorkoutMapping))}
     assert old_ids.isdisjoint(new_ids)
     assert set(fake.deleted) == old_ids
 

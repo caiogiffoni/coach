@@ -223,9 +223,16 @@ def _is_hard_run(run: Activity, threshold_hr: int | None) -> bool:
     """plan_week-style classification: training effect first, avg HR vs LTHR."""
     if run.aerobic_training_effect and run.aerobic_training_effect >= HARD_AEROBIC_TE:
         return True
-    if run.anaerobic_training_effect and run.anaerobic_training_effect >= HARD_ANAEROBIC_TE:
+    if (
+        run.anaerobic_training_effect
+        and run.anaerobic_training_effect >= HARD_ANAEROBIC_TE
+    ):
         return True
-    if run.avg_hr and threshold_hr and run.avg_hr >= HARD_HR_LTHR_FRACTION * threshold_hr:
+    if (
+        run.avg_hr
+        and threshold_hr
+        and run.avg_hr >= HARD_HR_LTHR_FRACTION * threshold_hr
+    ):
         return True
     return False
 
@@ -246,7 +253,9 @@ def _training_state(db: Session, profile: Profile) -> TrainingState:
     complete = [v for v in volumes if v.complete]
     last_complete_week_km = complete[-1].volume_km if complete else None
 
-    days_since_last_run = (as_of - last_run_date).days if (as_of and last_run_date) else None
+    days_since_last_run = (
+        (as_of - last_run_date).days if (as_of and last_run_date) else None
+    )
 
     days_since_last_hard = None
     if as_of and last_run_date:
@@ -258,7 +267,9 @@ def _training_state(db: Session, profile: Profile) -> TrainingState:
             )
         )
         hard_dates = [
-            r.start_time_local.date() for r in recent if _is_hard_run(r, profile.threshold_hr)
+            r.start_time_local.date()
+            for r in recent
+            if _is_hard_run(r, profile.threshold_hr)
         ]
         if hard_dates:
             days_since_last_hard = (as_of - max(hard_dates)).days
@@ -283,7 +294,8 @@ def _training_state(db: Session, profile: Profile) -> TrainingState:
             select(DailyWellness.resting_hr)
             .where(
                 DailyWellness.calendar_date <= as_of,
-                DailyWellness.calendar_date >= as_of - timedelta(days=RHR_BASELINE_DAYS),
+                DailyWellness.calendar_date
+                >= as_of - timedelta(days=RHR_BASELINE_DAYS),
                 DailyWellness.resting_hr.is_not(None),
             )
             .order_by(DailyWellness.calendar_date)
@@ -341,7 +353,8 @@ def _fatigue_reasons(state: TrainingState) -> list[str]:
     if (
         state.resting_hr_latest is not None
         and state.resting_hr_baseline
-        and state.resting_hr_latest > state.resting_hr_baseline * (1 + RHR_VETO_FRACTION)
+        and state.resting_hr_latest
+        > state.resting_hr_baseline * (1 + RHR_VETO_FRACTION)
     ):
         pct = round((state.resting_hr_latest / state.resting_hr_baseline - 1) * 100)
         reasons.append(
@@ -361,7 +374,11 @@ def _fatigue_reasons(state: TrainingState) -> list[str]:
             f"({state.hrv_baseline_lo:.0f} ms)"
         )
     if state.readiness_level and state.readiness_level.upper() in READINESS_VETO_LEVELS:
-        score = f"{state.readiness_score}/100" if state.readiness_score is not None else "n/a"
+        score = (
+            f"{state.readiness_score}/100"
+            if state.readiness_score is not None
+            else "n/a"
+        )
         reasons.append(f"Training readiness {state.readiness_level} ({score})")
     return reasons
 
@@ -444,10 +461,14 @@ def _session_roles(n: int, quality_allowed: bool) -> list[SessionType]:
     elif n == 4:
         roles = ["aerobic", "quality", "recovery", "long"]
     else:
-        roles = ["aerobic", "quality", "recovery"] + ["aerobic"] * (n - 5) + [
-            "quality",
-            "long",
-        ]
+        roles = (
+            ["aerobic", "quality", "recovery"]
+            + ["aerobic"] * (n - 5)
+            + [
+                "quality",
+                "long",
+            ]
+        )
     if not quality_allowed:
         roles = ["aerobic" if r == "quality" else r for r in roles]
     return roles
@@ -508,7 +529,9 @@ def _build_slots(
     easy_only: bool,
     target_km: float,
 ) -> list[SessionSlot]:
-    hr_zones = {z.zone: z for z in zone_data["hr_zones"]} if zone_data["hr_zones"] else {}
+    hr_zones = (
+        {z.zone: z for z in zone_data["hr_zones"]} if zone_data["hr_zones"] else {}
+    )
     pace_zones = (
         {z.name: z for z in zone_data["pace_zones"]} if zone_data["pace_zones"] else {}
     )

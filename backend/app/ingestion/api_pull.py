@@ -91,27 +91,29 @@ def _transform_activities(raw: list[dict]) -> list[dict]:
         duration = a.get("duration")
         distance = a.get("distance")
         elevation = a.get("elevationGain")
-        rows.append({
-            "activity_id": activity_id,
-            "name": a.get("name"),
-            "activity_type": a.get("activityType"),
-            "sport_type": a.get("sportType"),
-            "start_time_gmt": _ms_to_dt(a.get("startTimeGmt")),
-            "start_time_local": _ms_to_dt(a.get("startTimeLocal")),
-            "duration_min": duration / 60_000 if duration is not None else None,
-            "distance_km": distance / 100_000 if distance is not None else None,
-            "elevation_gain_m": elevation / 100 if elevation is not None else None,
-            "avg_hr": a.get("avgHr"),
-            "max_hr": a.get("maxHr"),
-            "min_hr": a.get("minHr"),
-            "calories": a.get("calories"),
-            "vo2max_value": a.get("vO2MaxValue"),
-            "aerobic_training_effect": a.get("aerobicTrainingEffect"),
-            "anaerobic_training_effect": a.get("anaerobicTrainingEffect"),
-            "training_load": a.get("activityTrainingLoad"),
-            "lap_count": a.get("lapCount"),
-            "is_pr": a.get("pr"),
-        })
+        rows.append(
+            {
+                "activity_id": activity_id,
+                "name": a.get("name"),
+                "activity_type": a.get("activityType"),
+                "sport_type": a.get("sportType"),
+                "start_time_gmt": _ms_to_dt(a.get("startTimeGmt")),
+                "start_time_local": _ms_to_dt(a.get("startTimeLocal")),
+                "duration_min": duration / 60_000 if duration is not None else None,
+                "distance_km": distance / 100_000 if distance is not None else None,
+                "elevation_gain_m": elevation / 100 if elevation is not None else None,
+                "avg_hr": a.get("avgHr"),
+                "max_hr": a.get("maxHr"),
+                "min_hr": a.get("minHr"),
+                "calories": a.get("calories"),
+                "vo2max_value": a.get("vO2MaxValue"),
+                "aerobic_training_effect": a.get("aerobicTrainingEffect"),
+                "anaerobic_training_effect": a.get("anaerobicTrainingEffect"),
+                "training_load": a.get("activityTrainingLoad"),
+                "lap_count": a.get("lapCount"),
+                "is_pr": a.get("pr"),
+            }
+        )
     return rows
 
 
@@ -138,7 +140,10 @@ def _transform_daily_wellness(raw: list[dict]) -> list[dict]:
         if not isinstance(stress, dict):
             stress = {}
         agg_list = stress.get("aggregatorList") or []
-        total = next((a for a in agg_list if isinstance(a, dict) and a.get("type") == "TOTAL"), {})
+        total = next(
+            (a for a in agg_list if isinstance(a, dict) and a.get("type") == "TOTAL"),
+            {},
+        )
 
         body_battery = rec.get("bodyBattery") or {}
         if not isinstance(body_battery, dict):
@@ -193,7 +198,9 @@ def _transform_hrv(raw: list[dict]) -> list[dict]:
         if not isinstance(summary, dict):
             continue
 
-        metrics = {m["type"]: m for m in summary.get("metrics", []) if isinstance(m, dict)}
+        metrics = {
+            m["type"]: m for m in summary.get("metrics", []) if isinstance(m, dict)
+        }
         hrv = metrics.get("HRV", {})
         if not hrv and summary.get("value"):
             hrv = summary
@@ -202,17 +209,21 @@ def _transform_hrv(raw: list[dict]) -> list[dict]:
         if rmssd is None:
             continue
 
-        rows.append({
-            "calendar_date": cal,
-            "source": "daily",
-            "snapshot_time": "",
-            "rmssd": rmssd,
-            "sdrr": summary.get("sdrr"),
-            "hrv_status": hrv.get("status") or summary.get("status"),
-            "hrv_pct": hrv.get("percentage") or summary.get("percentage"),
-            "baseline_lo": hrv.get("baselineLowerLimit") or summary.get("baselineLowerLimit"),
-            "baseline_hi": hrv.get("baselineUpperLimit") or summary.get("baselineUpperLimit"),
-        })
+        rows.append(
+            {
+                "calendar_date": cal,
+                "source": "daily",
+                "snapshot_time": "",
+                "rmssd": rmssd,
+                "sdrr": summary.get("sdrr"),
+                "hrv_status": hrv.get("status") or summary.get("status"),
+                "hrv_pct": hrv.get("percentage") or summary.get("percentage"),
+                "baseline_lo": hrv.get("baselineLowerLimit")
+                or summary.get("baselineLowerLimit"),
+                "baseline_hi": hrv.get("baselineUpperLimit")
+                or summary.get("baselineUpperLimit"),
+            }
+        )
     return rows
 
 
@@ -293,7 +304,10 @@ def sync_garmin_data(
     try:
         raw_wellness = client.get_daily_wellness(start_date, end_date)
         report.daily_wellness = _upsert_many(
-            db, DailyWellness, ("calendar_date",), _transform_daily_wellness(raw_wellness)
+            db,
+            DailyWellness,
+            ("calendar_date",),
+            _transform_daily_wellness(raw_wellness),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Sync daily_wellness failed: %s", exc)
@@ -303,7 +317,10 @@ def sync_garmin_data(
     try:
         raw_hrv = client.get_hrv(start_date, end_date)
         report.hrv = _upsert_many(
-            db, Hrv, ("calendar_date", "source", "snapshot_time"), _transform_hrv(raw_hrv)
+            db,
+            Hrv,
+            ("calendar_date", "source", "snapshot_time"),
+            _transform_hrv(raw_hrv),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Sync hrv failed: %s", exc)

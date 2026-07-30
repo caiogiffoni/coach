@@ -40,7 +40,8 @@ def test_registration_open_when_no_users(client):
 
 def test_register_returns_token_and_closes_registration(client):
     resp = client.post(
-        "/api/auth/register", json={"email": "caio@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
     )
     assert resp.status_code == 201
     assert resp.json()["token"]
@@ -48,28 +49,44 @@ def test_register_returns_token_and_closes_registration(client):
 
 
 def test_second_register_is_forbidden(client):
-    client.post("/api/auth/register", json={"email": "caio@example.com", "password": "secret123"})
+    client.post(
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
+    )
     resp = client.post(
-        "/api/auth/register", json={"email": "intruder@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "intruder@example.com", "password": "secret123"},
     )
     assert resp.status_code == 403
 
 
 def test_register_rejects_short_password(client):
-    resp = client.post("/api/auth/register", json={"email": "caio@example.com", "password": "short"})
+    resp = client.post(
+        "/api/auth/register", json={"email": "caio@example.com", "password": "short"}
+    )
     assert resp.status_code == 422
 
 
 def test_login_success(client):
-    client.post("/api/auth/register", json={"email": "caio@example.com", "password": "secret123"})
-    resp = client.post("/api/auth/login", json={"email": "caio@example.com", "password": "secret123"})
+    client.post(
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
+    )
+    resp = client.post(
+        "/api/auth/login", json={"email": "caio@example.com", "password": "secret123"}
+    )
     assert resp.status_code == 200
     assert resp.json()["token"]
 
 
 def test_login_wrong_password(client):
-    client.post("/api/auth/register", json={"email": "caio@example.com", "password": "secret123"})
-    resp = client.post("/api/auth/login", json={"email": "caio@example.com", "password": "wrongpass"})
+    client.post(
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
+    )
+    resp = client.post(
+        "/api/auth/login", json={"email": "caio@example.com", "password": "wrongpass"}
+    )
     assert resp.status_code == 401
 
 
@@ -79,7 +96,8 @@ def test_me_requires_auth(client):
 
 def test_me_with_token(client):
     token = client.post(
-        "/api/auth/register", json={"email": "caio@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
     ).json()["token"]
     resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200

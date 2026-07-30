@@ -39,7 +39,9 @@ def auth_status(db: Session = Depends(get_db)) -> StatusResponse:
     return StatusResponse(registration_open=user_count == 0)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
 def register(body: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
     user_count = db.scalar(select(func.count()).select_from(User))
     if user_count > 0:

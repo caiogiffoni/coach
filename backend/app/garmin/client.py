@@ -209,7 +209,9 @@ class RealGarminClient(GarminClient):
         """
         client = self._ensure_logged_in()
         if not hasattr(client, method_name):
-            logger.warning("Garmin method %s not available in this library version", method_name)
+            logger.warning(
+                "Garmin method %s not available in this library version", method_name
+            )
             return []
 
         rows: list[dict] = []
@@ -220,7 +222,9 @@ class RealGarminClient(GarminClient):
             except (GarminConnectConnectionError, RuntimeError):
                 raise
             except Exception as exc:  # noqa: BLE001 — best-effort read; don't crash sync
-                logger.warning("Garmin %s failed for %s: %s", method_name, date_str, exc)
+                logger.warning(
+                    "Garmin %s failed for %s: %s", method_name, date_str, exc
+                )
                 continue
 
             if result is None:
@@ -245,7 +249,9 @@ class RealGarminClient(GarminClient):
         client = self._ensure_logged_in()
         method_name = "get_activities_by_date"
         if not hasattr(client, method_name):
-            logger.warning("Garmin method %s not available; skipping activities", method_name)
+            logger.warning(
+                "Garmin method %s not available; skipping activities", method_name
+            )
             return []
         try:
             return self._call(
@@ -279,7 +285,9 @@ class RealGarminClient(GarminClient):
         steps_by_date: dict[str, dict] = {}
         if hasattr(client, "get_daily_steps"):
             try:
-                steps = self._call("get_daily_steps", start_date.isoformat(), end_date.isoformat())
+                steps = self._call(
+                    "get_daily_steps", start_date.isoformat(), end_date.isoformat()
+                )
                 if isinstance(steps, list):
                     for item in steps:
                         if isinstance(item, dict) and item.get("calendarDate"):
@@ -346,9 +354,7 @@ class RealGarminClient(GarminClient):
         """
         client = self._ensure_logged_in()
         # Garmin's API uses 0-indexed months; the wrapper subtracts 1 internally.
-        month_data = client.get_scheduled_workouts(
-            target_date.year, target_date.month
-        )
+        month_data = client.get_scheduled_workouts(target_date.year, target_date.month)
         date_key = target_date.isoformat()
         items: list[dict] = month_data.get(date_key, [])
         return [

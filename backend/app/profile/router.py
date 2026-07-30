@@ -121,9 +121,7 @@ def seed_profile(
     db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> Profile:
     if not has_imported_data(db):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "No imported data to seed from"
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "No imported data to seed from")
     return seed_profile_from_data(user.id, db)
 
 

@@ -25,7 +25,8 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_token(user_id: int) -> str:
     payload = {
         "sub": str(user_id),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=settings.token_expire_hours),
+        "exp": datetime.now(timezone.utc)
+        + timedelta(hours=settings.token_expire_hours),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
@@ -37,7 +38,9 @@ def get_current_user(
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     try:
-        payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            credentials.credentials, settings.secret_key, algorithms=[ALGORITHM]
+        )
         user_id = int(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from None

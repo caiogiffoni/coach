@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from conftest import make_session
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -21,9 +22,7 @@ from app.ingestion.fit_parser import (
     parse_fit_file,
     upsert_activity_from_fit,
 )
-from app.ingestion.models import Activity, DailyWellness
-from app.ingestion.router import UploadReport
-from conftest import make_session
+from app.ingestion.models import Activity
 
 
 def _make_gdpr_zip() -> bytes:
@@ -109,7 +108,8 @@ def client():
 
 def _register(client: TestClient) -> str:
     resp = client.post(
-        "/api/auth/register", json={"email": "caio@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
     )
     assert resp.status_code == 201
     return resp.json()["token"]
@@ -121,7 +121,9 @@ def _register(client: TestClient) -> str:
 
 
 def test_upload_requires_auth(client):
-    resp = client.post("/api/ingestion/upload", files={"files": ("x.zip", _make_gdpr_zip())})
+    resp = client.post(
+        "/api/ingestion/upload", files={"files": ("x.zip", _make_gdpr_zip())}
+    )
     assert resp.status_code == 401
 
 
@@ -240,7 +242,9 @@ def test_map_fit_session_and_upsert():
     assert activity.distance_km == 10.0
 
     # Idempotency: re-upsert updates the same row
-    row = db.scalar(select(Activity).where(Activity.activity_id == activity.activity_id))
+    row = db.scalar(
+        select(Activity).where(Activity.activity_id == activity.activity_id)
+    )
     assert row is not None
     assert row.distance_km == 10.0
 

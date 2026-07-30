@@ -3,14 +3,13 @@ Ingestion tests — run the export import against the real Garmin GDPR export
 at ../temp/garmin_info/ using the same in-memory DB override as test_auth.py.
 """
 
-
 import json
 import zipfile
 from datetime import date
 from pathlib import Path
 
-
 import pytest
+from conftest import EXPORT, make_session
 from sqlalchemy import func, select
 
 from app.ingestion.export_import import import_export
@@ -27,15 +26,23 @@ from app.ingestion.models import (
     TrainingReadiness,
     Vo2Max,
 )
-from conftest import EXPORT, make_session
 
 MODELS = [
-    Activity, DailyWellness, Sleep, Hrv, Vo2Max, RacePrediction,
-    TrainingLoad, TrainingReadiness, TrainingHistory, PersonalRecord,
+    Activity,
+    DailyWellness,
+    Sleep,
+    Hrv,
+    Vo2Max,
+    RacePrediction,
+    TrainingLoad,
+    TrainingReadiness,
+    TrainingHistory,
+    PersonalRecord,
 ]
 
 
 pytestmark = pytest.mark.realdata
+
 
 def count(db, model) -> int:
     return db.scalar(select(func.count()).select_from(model))
@@ -166,8 +173,10 @@ def test_import_from_zip(tmp_path):
     )
     zip_path = tmp_path / "export.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.write(metrics / "TrainingReadinessDTO_20260101_20260102_102452306.json",
-                 arcname="garmin_info/DI_CONNECT/DI-Connect-Metrics/TrainingReadinessDTO_20260101_20260102_102452306.json")
+        zf.write(
+            metrics / "TrainingReadinessDTO_20260101_20260102_102452306.json",
+            arcname="garmin_info/DI_CONNECT/DI-Connect-Metrics/TrainingReadinessDTO_20260101_20260102_102452306.json",
+        )
 
     db = make_session()
     report = import_export(zip_path, db)
@@ -194,7 +203,8 @@ def test_import_endpoint_requires_auth(client):
 
 def test_import_endpoint_end_to_end(client):
     token = client.post(
-        "/api/auth/register", json={"email": "caio@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
     ).json()["token"]
     resp = client.post(
         "/api/ingestion/import",
@@ -210,7 +220,8 @@ def test_import_endpoint_end_to_end(client):
 
 def test_import_endpoint_bad_path(client):
     token = client.post(
-        "/api/auth/register", json={"email": "caio@example.com", "password": "secret123"}
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
     ).json()["token"]
     resp = client.post(
         "/api/ingestion/import",

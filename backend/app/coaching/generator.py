@@ -159,9 +159,7 @@ def build_user_prompt(
     )
     if notes:
         sections.append(f"\n# NOTES FROM THE ATHLETE\n{notes.strip()}")
-    sections.append(
-        "\nRespond with the JSON week only, matching the schema exactly."
-    )
+    sections.append("\nRespond with the JSON week only, matching the schema exactly.")
     return "\n".join(sections)
 
 
@@ -231,9 +229,7 @@ def parse_workout(raw: str) -> GeneratedWorkout:
             f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
             for e in exc.errors()[:5]
         )
-        raise ValueError(
-            f"Response does not match the workout schema: {msgs}"
-        ) from exc
+        raise ValueError(f"Response does not match the workout schema: {msgs}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +331,9 @@ def generate_week(
         prompt = build_user_prompt(constraints, profile, notes)
         errors: list[str] = []
         for _ in range(MAX_ATTEMPTS):
-            raw = llm.generate(SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else ""))
+            raw = llm.generate(
+                SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else "")
+            )
             try:
                 week = parse_week(raw)
                 errors = validate_week(week, constraints)
@@ -371,7 +369,9 @@ def generate_day(
         prompt = build_day_prompt(slot, constraints, profile, notes)
         errors: list[str] = []
         for _ in range(MAX_ATTEMPTS):
-            raw = llm.generate(SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else ""))
+            raw = llm.generate(
+                SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else "")
+            )
             try:
                 candidate = parse_workout(raw)
                 candidate.date = slot.date  # the slot date wins over the LLM's

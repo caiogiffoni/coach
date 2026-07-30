@@ -5,12 +5,10 @@ register → import → seed → constraints → generate → guard → approve 
 All external clients are fakes injected via FastAPI dependency overrides.
 """
 
-
-from datetime import date, datetime, timedelta
-from pathlib import Path
-
+from datetime import date, datetime
 
 import pytest
+from conftest import EXPORT
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -19,13 +17,11 @@ from app.db import get_db
 from app.garmin.client import GarminClient, LoginResult, get_garmin_client
 from app.garmin.models import GarminWorkoutMapping
 from app.garmin.push import push_week
-from app.ingestion.api_pull import SyncReport
 from app.ingestion.models import Activity
 from app.llm.client import get_llm_client
 from app.main import app
 from app.models import User
 from app.profile.models import Profile
-from conftest import EXPORT
 
 WEEK = date(2026, 5, 11)  # Monday used as the target week.
 
@@ -36,6 +32,7 @@ WEEK = date(2026, 5, 11)  # Monday used as the target week.
 
 
 pytestmark = pytest.mark.realdata
+
 
 class FakePushGarminClient(GarminClient):
     """In-memory Garmin client that records uploaded/scheduled workouts."""
@@ -74,7 +71,9 @@ class FakePushGarminClient(GarminClient):
             raise RuntimeError("Not logged in")
         self.deleted.append(garmin_workout_id)
         for d, workouts in self.scheduled.items():
-            self.scheduled[d] = [w for w in workouts if w["workoutId"] != garmin_workout_id]
+            self.scheduled[d] = [
+                w for w in workouts if w["workoutId"] != garmin_workout_id
+            ]
 
     def get_workouts_for_date(self, target_date: date) -> list[dict]:
         if not self.is_logged_in():
@@ -218,7 +217,9 @@ def test_full_lifecycle(client):
     headers = register(client)
 
     # 1. Import the real GDPR export via the API.
-    resp = client.post("/api/ingestion/import", json={"path": str(EXPORT)}, headers=headers)
+    resp = client.post(
+        "/api/ingestion/import", json={"path": str(EXPORT)}, headers=headers
+    )
     assert resp.status_code == 200, resp.text
     import_report = resp.json()
     assert import_report["activities"] > 0 or import_report["daily_wellness"] > 0

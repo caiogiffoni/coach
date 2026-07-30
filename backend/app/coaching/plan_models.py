@@ -25,7 +25,9 @@ class WeekPlan(Base):
     goal_mode: Mapped[str] = mapped_column(String(10))  # snapshot at generation
     notes: Mapped[str] = mapped_column(String, default="")  # notes-to-coach
     source: Mapped[str] = mapped_column(String(10))  # llm | fallback
-    status: Mapped[str] = mapped_column(String(10), default="draft")  # draft|approved|pushed
+    status: Mapped[str] = mapped_column(
+        String(10), default="draft"
+    )  # draft|approved|pushed
     validation_errors: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
@@ -42,9 +44,7 @@ class Workout(Base):
     __tablename__ = "workouts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    week_plan_id: Mapped[int] = mapped_column(
-        ForeignKey("week_plans.id"), index=True
-    )
+    week_plan_id: Mapped[int] = mapped_column(ForeignKey("week_plans.id"), index=True)
     date: Mapped[date] = mapped_column(Date)
     name: Mapped[str] = mapped_column(String(200))
     sport: Mapped[str] = mapped_column(String(20), default="running")

@@ -48,6 +48,8 @@ make install        # uv sync + npm install
 make test           # all tests + frontend build/lint
 make test-backend   # backend pytest only
 make test-frontend  # frontend build + lint only
+make lint-backend   # backend ruff lint
+make format-backend # backend ruff format + auto-fix
 make build          # frontend production build
 make docker         # docker compose up --build
 ```

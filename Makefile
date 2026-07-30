@@ -1,7 +1,7 @@
-.PHONY: backend frontend dev install docker test test-backend test-frontend build clean
+.PHONY: backend frontend dev install docker test test-backend test-frontend lint-backend format-backend build clean
 
 backend:
-	cd backend && uv run uvicorn app.main:app --reload --port 8000
+	cd backend && uv run uvicorn app.main:app --reload --port 8003
 
 frontend:
 	cd frontend && npm run dev
@@ -25,6 +25,12 @@ test-frontend:
 	cd frontend && npm run build && npm run lint
 
 test: test-backend test-frontend
+
+lint-backend:
+	cd backend && uv run ruff check app tests
+
+format-backend:
+	cd backend && uv run ruff format app tests && uv run ruff check --fix app tests
 
 build:
 	cd frontend && npm run build

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..ingestion.api_pull import latest_local_date
 from ..profile.models import Profile
-from .constraints import SessionSlot, WeekConstraints, compute_constraints
+from .constraints import compute_constraints
 from .plan_models import WeekPlan, Workout
 
 # ACWR threshold used as a secondary fatigue signal. Garmin's own status is

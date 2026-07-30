@@ -7,7 +7,7 @@ workouts we created and leave everything else alone.
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Date, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -17,9 +17,7 @@ class GarminWorkoutMapping(Base):
     __tablename__ = "garmin_workout_mappings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    week_plan_id: Mapped[int] = mapped_column(
-        ForeignKey("week_plans.id"), index=True
-    )
+    week_plan_id: Mapped[int] = mapped_column(ForeignKey("week_plans.id"), index=True)
     date: Mapped[date] = mapped_column(Date)
     garmin_workout_id: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(

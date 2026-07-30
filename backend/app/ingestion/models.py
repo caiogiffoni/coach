@@ -25,7 +25,9 @@ class Activity(Base):
     calories: Mapped[float | None] = mapped_column(Float, nullable=True)
     vo2max_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     aerobic_training_effect: Mapped[float | None] = mapped_column(Float, nullable=True)
-    anaerobic_training_effect: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anaerobic_training_effect: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
     training_load: Mapped[float | None] = mapped_column(Float, nullable=True)
     lap_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_pr: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -101,7 +103,9 @@ class Hrv(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     calendar_date: Mapped[date] = mapped_column(Date, index=True)
     source: Mapped[str] = mapped_column(String(20))
-    snapshot_time: Mapped[str] = mapped_column(String(20), default="")  # "" for daily rows
+    snapshot_time: Mapped[str] = mapped_column(
+        String(20), default=""
+    )  # "" for daily rows
     rmssd: Mapped[float | None] = mapped_column(Float, nullable=True)
     sdrr: Mapped[float | None] = mapped_column(Float, nullable=True)
     hrv_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -191,5 +195,7 @@ class BiometricProfile(Base):
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     vo2max: Mapped[float | None] = mapped_column(Float, nullable=True)
     lactate_threshold_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
-    functional_threshold_power: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    functional_threshold_power: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     activity_class: Mapped[int | None] = mapped_column(Integer, nullable=True)

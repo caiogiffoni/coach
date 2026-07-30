@@ -88,8 +88,11 @@ def hr_zones_karvonen(max_hr: int, resting_hr: int) -> list[HrZone]:
     """Fallback zones from heart-rate reserve when LTHR is unknown."""
     reserve = max_hr - resting_hr
     return [
-        HrZone(zone=name, min_bpm=round(resting_hr + lo * reserve),
-               max_bpm=round(resting_hr + hi * reserve))
+        HrZone(
+            zone=name,
+            min_bpm=round(resting_hr + lo * reserve),
+            max_bpm=round(resting_hr + hi * reserve),
+        )
         for name, lo, hi in _HRR_ZONES
     ]
 
@@ -108,8 +111,11 @@ def threshold_pace_from_race(distance_km: float, time_sec: int) -> int:
 def pace_zones(threshold_pace_sec_per_km: int) -> list[PaceZone]:
     """Daniels-style pace zones from threshold pace (sec/km)."""
     return [
-        PaceZone(name=name, min_sec_per_km=round(threshold_pace_sec_per_km * lo),
-                 max_sec_per_km=round(threshold_pace_sec_per_km * hi))
+        PaceZone(
+            name=name,
+            min_sec_per_km=round(threshold_pace_sec_per_km * lo),
+            max_sec_per_km=round(threshold_pace_sec_per_km * hi),
+        )
         for name, lo, hi in _PACE_ZONES
     ]
 

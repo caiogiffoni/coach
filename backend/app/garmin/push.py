@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..coaching.plan_models import WeekPlan, Workout
 from ..models import User
-from .client import GarminClient, LoginResult
+from .client import GarminClient
 from .mapper import workout_to_garmin_json
 from .models import GarminWorkoutMapping
 

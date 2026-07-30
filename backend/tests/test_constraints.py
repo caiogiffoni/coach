@@ -6,11 +6,10 @@ seeded profile); behavior-focused tests use small synthetic databases so each
 scenario (fatigue veto, deload cycle, phases) is hermetic.
 """
 
-
 from datetime import date, datetime, timedelta
 
-
 import pytest
+from conftest import EXPORT, make_session
 from fastapi.testclient import TestClient
 
 from app.coaching.constraints import compute_constraints
@@ -21,7 +20,6 @@ from app.main import app
 from app.models import User
 from app.profile.models import Profile
 from app.profile.seed import seed_profile_from_data
-from conftest import EXPORT, make_session
 
 # A Monday used as the default target week across the synthetic tests.
 TARGET = date(2026, 6, 1)  # Monday
@@ -33,6 +31,7 @@ TARGET = date(2026, 6, 1)  # Monday
 
 
 pytestmark = pytest.mark.realdata
+
 
 def make_profile(**overrides) -> Profile:
     """Transient profile (no DB needed — the engine only reads attributes)."""
@@ -199,7 +198,9 @@ def test_injury_flag_removes_consecutive_days():
 def test_max_two_quality_and_no_back_to_back_hard():
     db = build_db(volumes=[28.0, 30.0])
     profile = make_profile(
-        goal_mode="race", goal_race_distance="10K", goal_race_date=TARGET + timedelta(weeks=10)
+        goal_mode="race",
+        goal_race_distance="10K",
+        goal_race_date=TARGET + timedelta(weeks=10),
     )
     c = compute_constraints(db, profile, TARGET, days_override=[0, 1, 2, 4, 6])
 
@@ -214,7 +215,9 @@ def test_max_two_quality_and_no_back_to_back_hard():
 def test_long_run_capped_at_30_percent_of_target():
     db = build_db(volumes=[28.0, 30.0])
     profile = make_profile(
-        goal_mode="race", goal_race_distance="10K", goal_race_date=TARGET + timedelta(weeks=10)
+        goal_mode="race",
+        goal_race_distance="10K",
+        goal_race_date=TARGET + timedelta(weeks=10),
     )
     c = compute_constraints(db, profile, TARGET)
     long_slots = [s for s in c.sessions if s.type == "long"]
@@ -225,7 +228,9 @@ def test_long_run_capped_at_30_percent_of_target():
 def test_build_week_budget_is_20_percent():
     db = build_db(volumes=[28.0, 30.0])
     profile = make_profile(
-        goal_mode="race", goal_race_distance="10K", goal_race_date=TARGET + timedelta(weeks=10)
+        goal_mode="race",
+        goal_race_distance="10K",
+        goal_race_date=TARGET + timedelta(weeks=10),
     )
     c = compute_constraints(db, profile, TARGET)
     assert c.cycle_week_type == "build"
@@ -329,7 +334,9 @@ def test_endpoint_requires_auth(client):
 
 
 def test_endpoint_404_without_profile(client):
-    resp = client.get("/api/coaching/constraints?week=2026-05-11", headers=register(client))
+    resp = client.get(
+        "/api/coaching/constraints?week=2026-05-11", headers=register(client)
+    )
     assert resp.status_code == 404
 
 

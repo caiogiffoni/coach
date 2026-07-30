@@ -81,9 +81,7 @@ def _step_distance_km(step: WorkoutStep, slot: SessionSlot) -> float | None:
     return step.duration_min * 60 / pace
 
 
-def _workout_distance_km(
-    workout: GeneratedWorkout, slot: SessionSlot
-) -> float | None:
+def _workout_distance_km(workout: GeneratedWorkout, slot: SessionSlot) -> float | None:
     parts = [_step_distance_km(s, slot) for s in workout.steps]
     known = [p for p in parts if p is not None]
     return sum(known) if known else None

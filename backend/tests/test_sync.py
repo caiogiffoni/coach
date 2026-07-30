@@ -23,7 +23,6 @@ from app.ingestion.models import (
     TrainingReadiness,
 )
 from app.main import app
-from app.models import User
 
 TODAY = date(2026, 6, 1)
 
@@ -129,8 +128,12 @@ class FakeGarminClient(GarminClient):
                 "name": "Morning Run",
                 "activityType": "running",
                 "sportType": "running",
-                "startTimeGmt": int(datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000),
-                "startTimeLocal": int(datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000),
+                "startTimeGmt": int(
+                    datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000
+                ),
+                "startTimeLocal": int(
+                    datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000
+                ),
                 "duration": 30 * 60 * 1000,
                 "distance": 500_000,  # 5 km in cm
                 "elevationGain": 1000,  # 10 m in cm
@@ -187,7 +190,7 @@ class FakeGarminClient(GarminClient):
                     "metrics": [{"type": "HRV", "value": 55, "status": "BALANCED"}],
                     "baselineLowerLimit": 50,
                     "baselineUpperLimit": 65,
-                }
+                },
             }
         ]
 
@@ -242,12 +245,16 @@ def test_sync_garmin_data_upserts_all_datasets():
     assert activity.distance_km == pytest.approx(5.0)
     assert activity.duration_min == pytest.approx(30.0)
 
-    wellness = db.scalar(select(DailyWellness).where(DailyWellness.calendar_date == TODAY))
+    wellness = db.scalar(
+        select(DailyWellness).where(DailyWellness.calendar_date == TODAY)
+    )
     assert wellness is not None
     assert wellness.resting_hr == 48
     assert wellness.total_steps == 8000
 
-    hrv = db.scalar(select(Hrv).where(Hrv.calendar_date == TODAY, Hrv.source == "daily"))
+    hrv = db.scalar(
+        select(Hrv).where(Hrv.calendar_date == TODAY, Hrv.source == "daily")
+    )
     assert hrv is not None
     assert hrv.rmssd == 55
 

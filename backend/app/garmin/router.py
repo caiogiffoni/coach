@@ -7,7 +7,7 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from .client import (
     garmin_client_or_raise,
     get_garmin_client,
 )
-from .push import PushReport, push_week
+from .push import push_week
 
 router = APIRouter(prefix="/api/garmin", tags=["garmin"])
 
