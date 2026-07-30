@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local data and secrets
+data/
+.env
+
+# OS / editor
+.DS_Store

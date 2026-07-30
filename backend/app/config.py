@@ -13,10 +13,13 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{DATA_DIR / 'coach.db'}"
     token_expire_hours: int = 24 * 7
 
-    # LLM provider (OpenAI-compatible). Defaults: Kimi K2.
+    # LLM provider. Default: Kimi K2 via its OpenAI-compatible endpoint;
+    # set LLM_PROVIDER=claude (plus LLM_API_KEY/LLM_MODEL) for Claude.
+    llm_provider: str = "kimi"  # kimi | claude
     llm_base_url: str = "https://api.moonshot.ai/v1"
     llm_api_key: str = ""
     llm_model: str = "kimi-k2-0905-preview"
+    llm_timeout_seconds: float = 60.0
 
     # Garmin Connect (unofficial API). Optional until push/sync is used.
     garmin_email: str = ""
