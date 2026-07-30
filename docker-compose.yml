@@ -1,0 +1,18 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coach-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override local paths to use the container path (the volume below mounts here)
+      DATABASE_URL: "sqlite:////app/data/coach.db"
+      GARMIN_TOKEN_STORE: "/app/data/garmin_tokens"
+      UPLOAD_DIR: "/app/data/uploads"
+    volumes:
+      - ./backend/data:/app/data
+    restart: unless-stopped

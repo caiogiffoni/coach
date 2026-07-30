@@ -42,6 +42,25 @@ API_PROXY_TARGET=http://localhost:8001 npm run dev
 
 Push and auto-sync require real Garmin credentials. The daily guard and workout generator run entirely on local data.
 
+## Run with Docker
+
+The backend can also run in Docker (frontend still runs locally with `npm run dev`):
+
+```bash
+cp backend/.env.example backend/.env
+# edit backend/.env to add GARMIN_EMAIL/GARMIN_PASSWORD if you want push/sync
+docker compose up --build
+```
+
+This mounts `./backend/data` as a volume so the SQLite database and Garmin tokens persist across container restarts. The API is exposed on port 8000. Then run the frontend with:
+
+```bash
+cd frontend
+npm run dev
+```
+
+If port 8000 is already in use, change the host mapping in `docker-compose.yml` (e.g. `"8001:8000"`) and set `API_PROXY_TARGET=http://localhost:8001 npm run dev`.
+
 ## Tests
 
 ```bash

@@ -1,0 +1,11 @@
+# Docker build context for the backend
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+data/
+.env
+.env.example
+.gitignore
+tests/
