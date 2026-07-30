@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.ingestion.export_import import import_export
+from app.llm.client import get_llm_client
 from app.main import app
 
 EXPORT = Path(__file__).resolve().parents[2] / "temp" / "garmin_info"
@@ -20,6 +21,19 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "imported" in getattr(item, "fixturenames", []):
             item.add_marker(pytest.mark.realdata)
+
+
+@pytest.fixture(autouse=True)
+def no_real_llm():
+    """Never call a real LLM API during tests unless a fixture/test already injected a fake."""
+    if get_llm_client not in app.dependency_overrides:
+        app.dependency_overrides[get_llm_client] = lambda: None
+        set_by_fixture = True
+    else:
+        set_by_fixture = False
+    yield
+    if set_by_fixture:
+        app.dependency_overrides.pop(get_llm_client, None)
 
 
 def make_session():
