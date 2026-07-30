@@ -6,7 +6,9 @@ seeded profile); behavior-focused tests use small synthetic databases so each
 scenario (fatigue veto, deload cycle, phases) is hermetic.
 """
 
+
 from datetime import date, datetime, timedelta
+
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +31,8 @@ TARGET = date(2026, 6, 1)  # Monday
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+pytestmark = pytest.mark.realdata
 
 def make_profile(**overrides) -> Profile:
     """Transient profile (no DB needed — the engine only reads attributes)."""

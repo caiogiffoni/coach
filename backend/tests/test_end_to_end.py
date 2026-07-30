@@ -5,8 +5,10 @@ register → import → seed → constraints → generate → guard → approve 
 All external clients are fakes injected via FastAPI dependency overrides.
 """
 
+
 from datetime import date, datetime, timedelta
 from pathlib import Path
+
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,6 +34,8 @@ WEEK = date(2026, 5, 11)  # Monday used as the target week.
 # Fake clients
 # ---------------------------------------------------------------------------
 
+
+pytestmark = pytest.mark.realdata
 
 class FakePushGarminClient(GarminClient):
     """In-memory Garmin client that records uploaded/scheduled workouts."""

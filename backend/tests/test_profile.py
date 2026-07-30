@@ -6,14 +6,18 @@ Garmin export (same fixture pattern as test_ingestion.py); they run in file
 order and share that profile.
 """
 
+
 import pytest
 from fastapi.testclient import TestClient
+
 
 from app.db import get_db
 from app.ingestion.export_import import import_export
 from app.main import app
 from conftest import EXPORT, make_session
 
+
+pytestmark = pytest.mark.realdata
 
 @pytest.fixture(scope="module")
 def data_client():

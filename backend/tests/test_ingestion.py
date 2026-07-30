@@ -3,10 +3,12 @@ Ingestion tests — run the export import against the real Garmin GDPR export
 at ../temp/garmin_info/ using the same in-memory DB override as test_auth.py.
 """
 
+
 import json
 import zipfile
 from datetime import date
 from pathlib import Path
+
 
 import pytest
 from sqlalchemy import func, select
@@ -32,6 +34,8 @@ MODELS = [
     TrainingLoad, TrainingReadiness, TrainingHistory, PersonalRecord,
 ]
 
+
+pytestmark = pytest.mark.realdata
 
 def count(db, model) -> int:
     return db.scalar(select(func.count()).select_from(model))
