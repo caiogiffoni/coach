@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     llm_model: str = "kimi-k2-0905-preview"
     llm_timeout_seconds: float = 60.0
 
+    # Manual uploads (GDPR zip / FIT files).
+    upload_dir: str = str(DATA_DIR / "uploads")
+
     # Garmin Connect (unofficial API). Optional until push/sync is used.
     garmin_email: str = ""
     garmin_password: str = ""
@@ -28,3 +31,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
