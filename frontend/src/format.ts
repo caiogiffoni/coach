@@ -99,3 +99,23 @@ export function formatDateShort(iso: string): string {
   const month = d.toLocaleString('en', { month: 'short' })
   return `${weekday} ${d.getDate()} ${month}`
 }
+
+/** "2026-05-11" → "May 11 – May 17, 2026" style week range. */
+export function formatWeekRange(isoStart: string): string {
+  const start = fromISODate(isoStart)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+
+  const sameYear = start.getFullYear() === end.getFullYear()
+  const sameMonth = sameYear && start.getMonth() === end.getMonth()
+
+  const optsStart: Intl.DateTimeFormatOptions = sameMonth
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric' }
+  const optsEnd: Intl.DateTimeFormatOptions = sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' }
+  const yearSuffix = sameYear ? `, ${start.getFullYear()}` : ''
+
+  return `${start.toLocaleDateString('en', optsStart)} – ${end.toLocaleDateString('en', optsEnd)}${yearSuffix}`
+}

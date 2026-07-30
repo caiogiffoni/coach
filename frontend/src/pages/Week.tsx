@@ -5,6 +5,7 @@ import { ApiError, coaching, garmin, ingestion, profile } from '../api'
 import { DayCard } from '../components/DayCard'
 import {
   addDays,
+  formatWeekRange,
   fromISODate,
   mondayOf,
   nextMonday,
@@ -371,6 +372,9 @@ export function Week() {
           onChange={(e) => pickWeek(e.target.value)}
           aria-label="Week (any date; snapped to Monday)"
         />
+        <span className="week-range" aria-hidden="true">
+          {formatWeekRange(weekStart)}
+        </span>
         <button
           type="button"
           className="icon-button"

@@ -581,6 +581,13 @@ input[type='radio']:checked {
   margin-bottom: 24px;
 }
 
+.week-controls .week-range {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
 .week-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
