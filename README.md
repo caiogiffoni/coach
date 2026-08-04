@@ -105,3 +105,15 @@ A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the backend tests (e
 - Race-day predictor, VDOT charts, analytics dashboards
 - Mobile app (v1 web UI is mobile-responsive only)
 - Mid-week auto-adjustment beyond the daily guard's veto/swap
+
+### Chatbot — single-day workout bot (planned)
+
+A chat page (`/chat`) where you type natural-language requests like "me manda um treino leve de quarta" or "random Monday", review the drafted workout, tweak it ("faz 50 minutos"), regenerate it, and push it to Garmin on approval.
+
+- **Template library:** imports all running workouts from your Garmin `workout.json` during data import; categorized by effort (`light`, `fartlek`, `long`, `tempo`) and day of week.
+- **Intent parsing:** LLM via OpenRouter (`moonshotai/kimi-k2`) with structured output.
+- **Flow:** message → draft → tweak/regenerate → approve → push.
+- **Auth:** same JWT as the app; no external agent (no Kimi Claw).
+- **MVP:** single-day only; Telegram and stats queries come later.
+
+Full details: `CHATBOT_PLAN.md`.
