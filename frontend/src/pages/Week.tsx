@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { ApiError, coaching, garmin, ingestion, profile } from '../api'
 import { DayCard } from '../components/DayCard'
 import {

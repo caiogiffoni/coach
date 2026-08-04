@@ -1,5 +1,5 @@
 import { Moon, Sun } from 'lucide-react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router'
 import { clearToken } from '../api'
 import { useTheme } from '../theme'
 
