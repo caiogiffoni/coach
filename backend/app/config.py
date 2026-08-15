@@ -23,6 +23,10 @@ class Settings(BaseSettings):
 
     # Manual uploads (GDPR zip / FIT files).
     upload_dir: str = str(DATA_DIR / "uploads")
+    upload_max_file_size_bytes: int = 100 * 1024 * 1024  # 100 MiB per file
+    upload_max_files_count: int = 10  # max files in a single /upload request
+    upload_max_zip_uncompressed_bytes: int = 500 * 1024 * 1024  # 500 MiB total
+    upload_max_zip_uncompressed_ratio: int = 100  # guard against zip bombs
 
     # Garmin Connect (unofficial API). Optional until push/sync is used.
     garmin_email: str = ""
