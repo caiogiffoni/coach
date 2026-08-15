@@ -11,7 +11,7 @@ def validate_upload_count(files: list[UploadFile], max_count: int) -> None:
     """Reject requests with too many files."""
     if len(files) > max_count:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Too many files: {len(files)} (max {max_count})",
         )
 
@@ -43,7 +43,7 @@ def save_upload_limited(
             written += len(chunk)
             if written > max_bytes:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail=f"File exceeds maximum size of {max_bytes} bytes",
                 )
             f.write(chunk)

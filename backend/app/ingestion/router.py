@@ -18,7 +18,6 @@ from .api_pull import SyncReport, latest_local_date, sync_garmin_data
 from .export_import import ImportReport, import_export
 from .fit_parser import FitParser, fit_parser_dependency, upsert_activity_from_fit
 from .safeguards import (
-    extract_zip_safely,
     sanitize_filename,
     save_upload_limited,
     validate_upload_count,
