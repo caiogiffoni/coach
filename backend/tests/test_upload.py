@@ -16,6 +16,7 @@ from conftest import make_session
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import get_db
 from app.ingestion.fit_parser import (
     fit_parser_dependency,
@@ -23,6 +24,11 @@ from app.ingestion.fit_parser import (
     upsert_activity_from_fit,
 )
 from app.ingestion.models import Activity
+from app.ingestion.safeguards import (
+    extract_zip_safely,
+    sanitize_filename,
+    validate_upload_count,
+)
 
 
 def _make_gdpr_zip() -> bytes:
@@ -307,3 +313,120 @@ def test_upload_fit_file_with_mocked_parser(client):
         assert body["totals"]["activities"] == 1
     finally:
         del app.dependency_overrides[fit_parser_dependency]
+# ---------------------------------------------------------------------------
+# Safeguard tests
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_filename_strips_paths():
+    assert sanitize_filename("report.zip") == "report.zip"
+    assert sanitize_filename("../../etc/passwd") == "passwd"
+    assert sanitize_filename("/tmp/export.zip") == "export.zip"
+    assert sanitize_filename("a\\b\\c.fit") == "a_b_c.fit"
+    assert sanitize_filename(None) == "unknown"
+    assert sanitize_filename("..") == "unknown"
+    assert sanitize_filename("") == "unknown"
+
+
+def test_validate_upload_count_rejects_too_many():
+    class FakeUpload:
+        pass
+
+    validate_upload_count([FakeUpload()], 5)
+    with pytest.raises(Exception):  # noqa: B017
+        validate_upload_count([FakeUpload(), FakeUpload()], 1)
+
+
+def test_upload_too_many_files(client, monkeypatch):
+    monkeypatch.setattr(settings, "upload_max_files_count", 1)
+    token = _register(client)
+    resp = client.post(
+        "/api/ingestion/upload",
+        files=[
+            ("files", ("a.zip", _make_gdpr_zip())),
+            ("files", ("b.zip", _make_gdpr_zip())),
+        ],
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 413
+
+
+def test_upload_file_too_large(client, monkeypatch):
+    monkeypatch.setattr(settings, "upload_max_file_size_bytes", 10)
+    token = _register(client)
+    resp = client.post(
+        "/api/ingestion/upload",
+        files={"files": ("big.fit", b"x" * 20)},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["files"][0]["status"] == "error"
+    assert "exceeds maximum size" in body["files"][0]["detail"]
+
+
+def test_upload_filename_sanitization(client):
+    token = _register(client)
+    resp = client.post(
+        "/api/ingestion/upload",
+        files={"files": ("../../tmp/export.zip", _make_gdpr_zip())},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["files"][0]["filename"] == "export.zip"
+    assert body["files"][0]["status"] == "ok"
+
+
+def _make_zip_with_path_traversal() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../../../tmp/evil.txt", "pwned")
+    return buf.getvalue()
+
+
+def test_upload_zip_path_traversal(client):
+    token = _register(client)
+    resp = client.post(
+        "/api/ingestion/upload",
+        files={"files": ("traversal.zip", _make_zip_with_path_traversal())},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["files"][0]["status"] == "error"
+    assert "unsafe path" in body["files"][0]["detail"].lower()
+
+
+def _make_zip_bomb(ratio: int = 200) -> bytes:
+    """Create a tiny zip that expands to a much larger repeated payload."""
+    uncompressed_size = ratio * 1024  # e.g. 200 KiB of zeros
+    payload = b"\x00" * uncompressed_size
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("bomb.txt", payload)
+    return buf.getvalue()
+
+
+def test_upload_zip_bomb_rejected(client):
+    token = _register(client)
+    resp = client.post(
+        "/api/ingestion/upload",
+        files={"files": ("bomb.zip", _make_zip_bomb(ratio=500))},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["files"][0]["status"] == "error"
+    assert "compression ratio" in body["files"][0]["detail"].lower()
+
+
+def test_extract_zip_safely_enforces_uncompressed_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "upload_max_zip_uncompressed_bytes", 100)
+    zip_path = tmp_path / "small.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("a.txt", b"x" * 50)
+        zf.writestr("b.txt", b"x" * 60)
+    target = tmp_path / "out"
+    with pytest.raises(ValueError, match="max uncompressed size"):
+        extract_zip_safely(zip_path, target, 100, 100)
