@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from .models import (
     Activity,
     BiometricProfile,
@@ -40,6 +41,7 @@ from .models import (
     TrainingReadiness,
     Vo2Max,
 )
+from .safeguards import extract_zip_safely
 
 FITNESS = "DI_CONNECT/DI-Connect-Fitness"
 AGGREGATOR = "DI_CONNECT/DI-Connect-Aggregator"
@@ -537,7 +539,11 @@ def import_export(export_path: Path, db: Session) -> ImportReport:
         raise FileNotFoundError(f"Export path does not exist: {export_path}")
     if export_path.is_file() and zipfile.is_zipfile(export_path):
         with tempfile.TemporaryDirectory() as tmp:
-            with zipfile.ZipFile(export_path) as zf:
-                zf.extractall(tmp)
+            extract_zip_safely(
+                export_path,
+                Path(tmp),
+                settings.upload_max_zip_uncompressed_bytes,
+                settings.upload_max_zip_uncompressed_ratio,
+            )
             return _import_from_root(_find_export_root(Path(tmp)), db)
     return _import_from_root(_find_export_root(export_path), db)

@@ -17,6 +17,12 @@ from ..models import User
 from .api_pull import SyncReport, latest_local_date, sync_garmin_data
 from .export_import import ImportReport, import_export
 from .fit_parser import FitParser, fit_parser_dependency, upsert_activity_from_fit
+from .safeguards import (
+    extract_zip_safely,
+    sanitize_filename,
+    save_upload_limited,
+    validate_upload_count,
+)
 
 router = APIRouter(prefix="/api/ingestion", tags=["ingestion"])
 
@@ -87,6 +93,8 @@ def upload_files(
     parser: FitParser = Depends(fit_parser_dependency),
 ) -> UploadReport:
     """Accept GDPR export zips and/or FIT activity files from the browser."""
+    validate_upload_count(files, settings.upload_max_files_count)
+
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     tmpdir = Path(tempfile.mkdtemp(prefix="upload_", dir=upload_dir))
@@ -114,7 +122,7 @@ def _process_upload(
     db: Session,
     parser: FitParser,
 ) -> FileResult:
-    filename = upload.filename or "unknown"
+    filename = sanitize_filename(upload.filename)
 
     if ext == ".zip":
         return _process_zip(upload, tmpdir, db, filename)
@@ -135,9 +143,9 @@ def _process_zip(
     db: Session,
     filename: str,
 ) -> FileResult:
-    zip_path = tmpdir / f"{upload.filename or 'export'}.zip"
+    zip_path = tmpdir / f"{filename}.zip"
     try:
-        _save_upload(upload, zip_path)
+        save_upload_limited(upload, zip_path, settings.upload_max_file_size_bytes)
         report = import_export(zip_path, db)
         return FileResult(filename=filename, status="ok", counts=report)
     except FileNotFoundError as exc:
@@ -146,6 +154,8 @@ def _process_zip(
         return FileResult(
             filename=filename, status="error", detail=f"Invalid zip: {exc}"
         )
+    except HTTPException as exc:
+        return FileResult(filename=filename, status="error", detail=str(exc.detail))
     except Exception as exc:  # noqa: BLE001
         return FileResult(
             filename=filename, status="error", detail=f"Import failed: {exc}"
@@ -159,9 +169,9 @@ def _process_fit(
     parser: FitParser,
     filename: str,
 ) -> FileResult:
-    fit_path = tmpdir / f"{upload.filename or 'activity'}.fit"
+    fit_path = tmpdir / f"{filename}.fit"
     try:
-        _save_upload(upload, fit_path)
+        save_upload_limited(upload, fit_path, settings.upload_max_file_size_bytes)
         parsed = parser(fit_path)
         upsert_activity_from_fit(db, parsed)
         db.commit()
@@ -170,17 +180,14 @@ def _process_fit(
     except ValueError as exc:
         db.rollback()
         return FileResult(filename=filename, status="error", detail=str(exc))
+    except HTTPException as exc:
+        db.rollback()
+        return FileResult(filename=filename, status="error", detail=str(exc.detail))
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         return FileResult(
             filename=filename, status="error", detail=f"FIT parse failed: {exc}"
         )
-
-
-def _save_upload(upload: UploadFile, dest: Path) -> None:
-    with open(dest, "wb") as f:
-        for chunk in upload.file:
-            f.write(chunk)
 
 
 @router.post("/sync", response_model=None)
