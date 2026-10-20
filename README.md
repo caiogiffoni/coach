@@ -1,6 +1,6 @@
 # coach
 
-AI running coach → Garmin Connect. Generates weekly running workouts from your profile, zones, and fatigue data, and pushes them to your Garmin calendar after manual review.
+AI running coach → Garmin Connect. Generates weekly running workouts from your profile, zones, and fatigue data, and pushes them to your Garmin calendar after manual review. A workout library page (**Workouts**) lets you build your own running workouts (warmup/run/recover/rest/cooldown steps, repeat blocks, time/distance/lap-button ends, HR zone, HR range or pace targets), save them, and push any of them to a chosen date on Garmin.
 
 ## Tech stack
 
@@ -81,6 +81,8 @@ make migrate
 5. Review the draft, then click **Approve**.
 6. Set `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `backend/.env`, restart the backend, and click **Push to Garmin**.
 
+To schedule a one-off session outside the weekly plan, open **Workouts**, build and save a workout, then push it to a date. Pushing the same workout twice to the same date creates two Garmin calendar entries.
+
 Push and auto-sync require real Garmin credentials. The daily guard and workout generator run entirely on local data.
 
 ## Run with Docker
@@ -116,7 +118,7 @@ A GitHub Actions workflow (`.github/workflows/ci.yml`) runs backend lint (`ruff 
 
 ## Backlog (explicitly out of v1)
 
-- Workout editor UI (v1 is regenerate/reject only)
+- Editing generated week-plan workouts (week plans are regenerate/reject only; build custom sessions in the workout library instead)
 - Multi-user support, OAuth, official Garmin Training API migration
 - Strength / cross-training workouts, route planning
 - Race-day predictor, VDOT charts, analytics dashboards

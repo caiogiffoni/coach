@@ -6,8 +6,8 @@ This file is a quick-start reference for AI coding agents. The project is a sing
 
 ## Project overview
 
-- **What it does:** Reads activities, wellness, HRV, RHR, sleep, training load, and race data; builds a weekly running plan inside hard sports-science guardrails; lets the user review, approve, and push the plan to their Garmin Connect calendar.
-- **Scope (v1):** Single user, running only, manual "Generate week" trigger, no workout editor, no mobile app, no background scheduler.
+- **What it does:** Reads activities, wellness, HRV, RHR, sleep, training load, and race data; builds a weekly running plan inside hard sports-science guardrails; lets the user review, approve, and push the plan to their Garmin Connect calendar. A standalone workout library (`/workouts`) lets the user build running workouts like Garmin Connect's workout builder, save them, and push any saved workout to a chosen date.
+- **Scope (v1):** Single user, running only, manual "Generate week" trigger, no editor for generated week-plan workouts (the separate workout library has a builder), no mobile app, no background scheduler.
 - **Auth model:** First-run registration opens only while the `users` table is empty, then closes permanently. One bearer token per session, stored in `localStorage` on the frontend.
 - **Language of the codebase and docs:** English.
 
@@ -89,6 +89,7 @@ coach/
 | `coaching/` | Constraint engine, LLM generator + validator, daily guard, week plan storage, `/api/coaching/*`. |
 | `garmin/` | Garmin client wrapper, workout mapper, idempotent push, `/api/garmin/*`. |
 | `llm/` | Provider-agnostic client (`kimi`/`claude`) and `get_llm_client` dependency. |
+| `workouts/` | Workout library: builder step schemas (`schemas.py`), estimates, Garmin JSON mapper (`garmin_mapper.py`), CRUD/duplicate/push service, `/api/workouts/*`. Tables `library_workouts`, `library_workout_pushes`. |
 
 Models live next to their routers (e.g. `app/profile/models.py`). They are listed in `MODEL_MODULES` in `app/db.py`; `import_all_models()` registers them for Alembic and the tests' `create_all`.
 
@@ -97,14 +98,14 @@ Models live next to their routers (e.g. `app/profile/models.py`). They are liste
 | File / Folder | Responsibility |
 |---------------|----------------|
 | `main.tsx` | Entry point; imports `tokens.css` and `base.css`. |
-| `App.tsx` | Router: `/login`, `/week`, `/profile`, `/data`. Protected routes use `RequireAuth`. |
+| `App.tsx` | Router: `/login`, `/week`, `/workouts`, `/profile`, `/data`. Protected routes use `RequireAuth`. |
 | `api.ts` | Fetch wrapper, Bearer token handling, typed API clients for every backend domain. |
 | `types.ts` | TypeScript interfaces mirroring backend Pydantic schemas. |
 | `theme.ts` | `useTheme` hook; toggles `data-theme="dark"` on `<html>`. |
 | `format.ts` | Date/pace/time formatting and ISO-week helpers. |
 | `workout.ts` | Workout display helpers (zone badges, derived distance, step targets). |
 | `components/` | `Nav`, `DayCard`, `RequireAuth`. |
-| `pages/` | `Week`, `Profile`, `Data`, `Login`. |
+| `pages/` | `Week`, `Workouts` (library + builder), `Profile`, `Data`, `Login`. |
 | `styles/` | `tokens.css` (design tokens) and `base.css` (component classes). |
 
 ---
@@ -257,13 +258,15 @@ There is no production deployment pipeline in this repo. The Docker Compose file
 8. Review the draft, click **Approve**.
 9. Set `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `backend/.env`, restart the backend, then click **Push to Garmin**.
 
+To schedule a one-off session, go to **Workouts**, build and save a workout, then push it to a date (also needs Garmin credentials).
+
 Push and auto-sync require real Garmin credentials; the daily guard and workout generator run entirely on local data.
 
 ---
 
 ## Explicitly out of scope (v1)
 
-- Workout editor UI (v1 is regenerate/reject only).
+- Editing generated week-plan workouts (week plans are regenerate/reject only; hand-built workouts live in the workout library).
 - Multi-user support, OAuth, official Garmin Training API.
 - Strength / cross-training workouts and route planning.
 - Race-day predictor, VDOT charts, analytics dashboards.
