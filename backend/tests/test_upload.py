@@ -313,6 +313,8 @@ def test_upload_fit_file_with_mocked_parser(client):
         assert body["totals"]["activities"] == 1
     finally:
         del app.dependency_overrides[fit_parser_dependency]
+
+
 # ---------------------------------------------------------------------------
 # Safeguard tests
 # ---------------------------------------------------------------------------

@@ -194,6 +194,42 @@ class RealGarminClient(GarminClient):
         except GarminConnectConnectionError as exc:
             raise RuntimeError(f"Garmin connection error: {exc}") from exc
 
+    @staticmethod
+    def _rows_from_result(result: object, date_str: str, key: str | None) -> list:
+        """Normalize one per-date Garmin response into rows with ``calendarDate``."""
+        if key:
+            payload = result.get(key) if isinstance(result, dict) else None
+            if not isinstance(payload, dict):
+                return []
+            payload["calendarDate"] = payload.get("calendarDate", date_str)
+            return [payload]
+        if isinstance(result, dict):
+            result["calendarDate"] = result.get("calendarDate", date_str)
+            return [result]
+        if isinstance(result, list):
+            for item in result:
+                if isinstance(item, dict):
+                    item.setdefault("calendarDate", date_str)
+            return result
+        return []
+
+    def _call_one_date(self, method_name: str, date_str: str) -> object | None:
+        """Call ``method_name`` for one date; None when the read failed."""
+        try:
+            result: object = self._call(method_name, date_str)
+            return result
+        except (GarminConnectConnectionError, RuntimeError):
+            raise
+        except Exception as exc:  # noqa: BLE001 — best-effort read; don't crash sync
+            logger.warning(
+                "Garmin %s failed for %s: %s",
+                method_name,
+                date_str,
+                exc,
+                extra={"dataset": method_name, "date": date_str, "error": repr(exc)},
+            )
+            return None
+
     def _call_per_date(
         self,
         method_name: str,
@@ -210,39 +246,18 @@ class RealGarminClient(GarminClient):
         client = self._ensure_logged_in()
         if not hasattr(client, method_name):
             logger.warning(
-                "Garmin method %s not available in this library version", method_name
+                "Garmin method %s not available in this library version",
+                method_name,
+                extra={"dataset": method_name},
             )
             return []
 
         rows: list[dict] = []
         for day in self._date_range(start_date, end_date):
             date_str = day.isoformat()
-            try:
-                result = self._call(method_name, date_str)
-            except (GarminConnectConnectionError, RuntimeError):
-                raise
-            except Exception as exc:  # noqa: BLE001 — best-effort read; don't crash sync
-                logger.warning(
-                    "Garmin %s failed for %s: %s", method_name, date_str, exc
-                )
-                continue
-
-            if result is None:
-                continue
-
-            if key:
-                payload = result.get(key) if isinstance(result, dict) else None
-                if isinstance(payload, dict):
-                    payload["calendarDate"] = payload.get("calendarDate", date_str)
-                    rows.append(payload)
-            elif isinstance(result, dict):
-                result["calendarDate"] = result.get("calendarDate", date_str)
-                rows.append(result)
-            elif isinstance(result, list):
-                for item in result:
-                    if isinstance(item, dict):
-                        item.setdefault("calendarDate", date_str)
-                rows.extend(result)
+            result = self._call_one_date(method_name, date_str)
+            if result is not None:
+                rows.extend(self._rows_from_result(result, date_str, key))
         return rows
 
     def get_activities(self, start_date: date, end_date: date) -> list[dict]:
@@ -250,7 +265,9 @@ class RealGarminClient(GarminClient):
         method_name = "get_activities_by_date"
         if not hasattr(client, method_name):
             logger.warning(
-                "Garmin method %s not available; skipping activities", method_name
+                "Garmin method %s not available; skipping activities",
+                method_name,
+                extra={"dataset": "activities"},
             )
             return []
         try:
@@ -260,9 +277,37 @@ class RealGarminClient(GarminClient):
                 end_date.isoformat(),
             )
             return result
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Garmin %s failed: %s", method_name, exc)
+        except Exception as exc:  # noqa: BLE001 — best-effort read; sync continues
+            _log_range_failure(method_name, start_date, end_date, exc)
             return []
+
+    def _daily_summaries(self, start_date: date, end_date: date) -> list[dict] | None:
+        """Per-date wellness summaries, or None when no method is available."""
+        client = self._ensure_logged_in()
+        # get_stats is the older compat name and tends to be the most stable
+        # source for RHR/steps; get_user_summary is the newer alias.
+        if hasattr(client, "get_stats"):
+            return self._call_per_date("get_stats", start_date, end_date)
+        if hasattr(client, "get_user_summary"):
+            return self._call_per_date("get_user_summary", start_date, end_date)
+        logger.warning(
+            "No daily wellness method available; skipping wellness",
+            extra={"dataset": "daily_wellness"},
+        )
+        return None
+
+    def _steps_by_date(self, start_date: date, end_date: date) -> dict[str, dict]:
+        """Daily step rows keyed by ``calendarDate`` (empty when unavailable)."""
+        if not hasattr(self._ensure_logged_in(), "get_daily_steps"):
+            return {}
+        try:
+            steps = self._call(
+                "get_daily_steps", start_date.isoformat(), end_date.isoformat()
+            )
+            return _index_steps_by_date(steps)
+        except Exception as exc:  # noqa: BLE001 — steps are optional enrichment
+            _log_range_failure("get_daily_steps", start_date, end_date, exc)
+            return {}
 
     def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
         """Combine daily user summary with step data for the date range.
@@ -270,41 +315,23 @@ class RealGarminClient(GarminClient):
         Uses ``get_user_summary(cdate)`` for the main wellness row and
         ``get_daily_steps(start, end)`` for step details. Body-battery/stress
         fields come from the summary where available.
+
+        Example:
+            ``client.get_daily_wellness(date(2026, 6, 1), date(2026, 6, 7))``
         """
-        client = self._ensure_logged_in()
-        summaries = []
-        # get_stats is the older compat name and tends to be the most stable
-        # source for RHR/steps; get_user_summary is the newer alias.
-        if hasattr(client, "get_stats"):
-            summaries = self._call_per_date("get_stats", start_date, end_date)
-        elif hasattr(client, "get_user_summary"):
-            summaries = self._call_per_date("get_user_summary", start_date, end_date)
-        else:
-            logger.warning("No daily wellness method available; skipping wellness")
+        summaries = self._daily_summaries(start_date, end_date)
+        if summaries is None:
             return []
-
-        steps_by_date: dict[str, dict] = {}
-        if hasattr(client, "get_daily_steps"):
-            try:
-                steps = self._call(
-                    "get_daily_steps", start_date.isoformat(), end_date.isoformat()
-                )
-                if isinstance(steps, list):
-                    for item in steps:
-                        if isinstance(item, dict) and item.get("calendarDate"):
-                            steps_by_date[item["calendarDate"]] = item
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Garmin get_daily_steps failed: %s", exc)
-
+        steps_by_date = self._steps_by_date(start_date, end_date)
         merged: list[dict] = []
         for summary in summaries:
             cal = summary.get("calendarDate")
             if not cal:
                 continue
-            merged_row = dict(summary)
             steps = steps_by_date.get(cal, {})
-            merged_row.update({k: v for k, v in steps.items() if v is not None})
-            merged.append(merged_row)
+            merged.append(
+                {**summary, **{k: v for k, v in steps.items() if v is not None}}
+            )
         return merged
 
     def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
@@ -319,7 +346,10 @@ class RealGarminClient(GarminClient):
             return self._call_per_date(
                 "get_morning_training_readiness", start_date, end_date, key="readiness"
             )
-        logger.warning("No training readiness method available; skipping readiness")
+        logger.warning(
+            "No training readiness method available; skipping readiness",
+            extra={"dataset": "training_readiness"},
+        )
         return []
 
     def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
@@ -365,6 +395,34 @@ class RealGarminClient(GarminClient):
             }
             for item in items
         ]
+
+
+def _index_steps_by_date(steps: object) -> dict[str, dict]:
+    """Key ``get_daily_steps`` rows by ``calendarDate`` (non-list → empty)."""
+    if not isinstance(steps, list):
+        return {}
+    return {
+        item["calendarDate"]: item
+        for item in steps
+        if isinstance(item, dict) and item.get("calendarDate")
+    }
+
+
+def _log_range_failure(
+    method_name: str, start_date: date, end_date: date, exc: Exception
+) -> None:
+    """Log a best-effort Garmin range read that failed (no credentials logged)."""
+    logger.warning(
+        "Garmin %s failed: %s",
+        method_name,
+        exc,
+        extra={
+            "dataset": method_name,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "error": repr(exc),
+        },
+    )
 
 
 @lru_cache(maxsize=1)

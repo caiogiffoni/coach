@@ -1,3 +1,4 @@
+import logging
 import shutil
 import tempfile
 import zipfile
@@ -24,6 +25,8 @@ from .safeguards import (
 )
 
 router = APIRouter(prefix="/api/ingestion", tags=["ingestion"])
+
+logger = logging.getLogger(__name__)
 
 
 class ImportRequest(BaseModel):
@@ -114,6 +117,16 @@ def upload_files(
     return UploadReport(files=results, totals=totals)
 
 
+def _log_upload_failure(dataset: str, filename: str, exc: Exception) -> None:
+    """Log an unexpected per-file upload failure (the file is reported, not raised)."""
+    logger.warning(
+        "Upload of %s failed: %s",
+        filename,
+        exc,
+        extra={"dataset": dataset, "upload_filename": filename, "error": repr(exc)},
+    )
+
+
 def _process_upload(
     upload: UploadFile,
     ext: str,
@@ -155,7 +168,8 @@ def _process_zip(
         )
     except HTTPException as exc:
         return FileResult(filename=filename, status="error", detail=str(exc.detail))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — report per file, keep processing
+        _log_upload_failure("export_zip", filename, exc)
         return FileResult(
             filename=filename, status="error", detail=f"Import failed: {exc}"
         )
@@ -182,8 +196,9 @@ def _process_fit(
     except HTTPException as exc:
         db.rollback()
         return FileResult(filename=filename, status="error", detail=str(exc.detail))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — report per file, keep processing
         db.rollback()
+        _log_upload_failure("fit", filename, exc)
         return FileResult(
             filename=filename, status="error", detail=f"FIT parse failed: {exc}"
         )

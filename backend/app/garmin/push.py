@@ -6,6 +6,7 @@ If a day already has a workout on Garmin that the app did not create, that day
 is skipped with a warning.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -18,6 +19,8 @@ from ..models import User
 from .client import GarminClient
 from .mapper import workout_to_garmin_json
 from .models import GarminWorkoutMapping
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,17 +54,8 @@ def _require_login(client: GarminClient) -> None:
         )
 
 
-def push_week(
-    week_start: date,
-    user: User,
-    db: Session,
-    client: GarminClient,
-) -> PushReport:
-    """Push the approved week starting on ``week_start`` for ``user``.
-
-    Raises ``HTTPException(409)`` if the week is not approved, or
-    ``HTTPException(401)`` if the Garmin client cannot log in.
-    """
+def _load_approved_plan(db: Session, user: User, week_start: date) -> WeekPlan:
+    """Return the user's plan for ``week_start``; 404 if missing, 409 if unapproved."""
     plan = db.scalar(
         select(WeekPlan).where(
             WeekPlan.user_id == user.id, WeekPlan.week_start == week_start
@@ -74,96 +68,146 @@ def push_week(
             status.HTTP_409_CONFLICT,
             f"Week {week_start} must be approved before pushing (status={plan.status})",
         )
+    return plan
 
-    _require_login(client)
 
-    report = PushReport()
-
-    # All mapping IDs for this week, used for collision detection.
-    week_mapping_ids = {
+def _week_mapping_ids(db: Session, plan_id: int) -> set[str]:
+    """All Garmin workout IDs the app created for this week (collision check)."""
+    return {
         str(m.garmin_workout_id)
         for m in db.scalars(
             select(GarminWorkoutMapping).where(
-                GarminWorkoutMapping.week_plan_id == plan.id
+                GarminWorkoutMapping.week_plan_id == plan_id
             )
         )
     }
 
-    workouts = sorted(plan.workouts, key=lambda w: w.date)
 
-    for workout in workouts:
-        try:
-            _push_workout(
-                workout=workout,
-                plan_id=plan.id,
-                db=db,
-                client=client,
-                week_mapping_ids=week_mapping_ids,
-                report=report,
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001 — keep pushing remaining days
-            report.errors.append(f"{workout.date.isoformat()}: {exc}")
+@dataclass
+class _PushContext:
+    """Per-week state shared by every workout push in ``push_week``."""
+
+    plan_id: int
+    db: Session
+    client: GarminClient
+    week_mapping_ids: set[str]  # app-created Garmin IDs (collision check)
+    report: PushReport
+
+
+def push_week(
+    week_start: date,
+    user: User,
+    db: Session,
+    client: GarminClient,
+) -> PushReport:
+    """Push the approved week starting on ``week_start`` for ``user``.
+
+    Raises ``HTTPException(409)`` if the week is not approved, or
+    ``HTTPException(401)`` if the Garmin client cannot log in.
+
+    Example:
+        ``push_week(date(2026, 5, 11), user, db, client).pushed_dates``
+    """
+    plan = _load_approved_plan(db, user, week_start)
+    _require_login(client)
+
+    ctx = _PushContext(
+        plan.id, db, client, _week_mapping_ids(db, plan.id), PushReport()
+    )
+    for workout in sorted(plan.workouts, key=lambda w: w.date):
+        _push_workout_best_effort(workout, ctx)
 
     plan.status = "pushed"
     db.commit()
 
-    return report
+    return ctx.report
 
 
-def _push_workout(
-    workout: Workout,
-    plan_id: int,
-    db: Session,
-    client: GarminClient,
-    week_mapping_ids: set[str],
-    report: PushReport,
+def _log_push_failure(
+    dataset: str, workout: Workout, exc: Exception, **fields: object
 ) -> None:
-    """Push a single workout, idempotently replacing a previous app upload."""
-    # 1. Delete any previous app-created workout for this (week, date).
-    existing = db.scalar(
+    """Structured warning for a per-day push failure (no credentials logged)."""
+    logger.warning(
+        "Garmin %s failed for %s: %s",
+        dataset,
+        workout.date.isoformat(),
+        exc,
+        extra={
+            "dataset": dataset,
+            "date": workout.date.isoformat(),
+            "error": repr(exc),
+            **fields,
+        },
+    )
+
+
+def _push_workout_best_effort(workout: Workout, ctx: _PushContext) -> None:
+    """Push one workout; record (and log) failures so remaining days still push."""
+    try:
+        _push_workout(workout, ctx)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — keep pushing remaining days
+        _log_push_failure("push_workout", workout, exc, week_plan_id=ctx.plan_id)
+        ctx.report.errors.append(f"{workout.date.isoformat()}: {exc}")
+
+
+def _delete_previous_upload(workout: Workout, ctx: _PushContext) -> None:
+    """Delete any previous app-created workout for this (week, date)."""
+    existing = ctx.db.scalar(
         select(GarminWorkoutMapping).where(
-            GarminWorkoutMapping.week_plan_id == plan_id,
+            GarminWorkoutMapping.week_plan_id == ctx.plan_id,
             GarminWorkoutMapping.date == workout.date,
         )
     )
-    if existing is not None:
-        try:
-            client.delete_workout(existing.garmin_workout_id)
-        except Exception as exc:  # noqa: BLE001
-            report.errors.append(
-                f"Could not delete previous workout {existing.garmin_workout_id}: {exc}"
-            )
-        db.delete(existing)
-        week_mapping_ids.discard(str(existing.garmin_workout_id))
-        db.flush()
+    if existing is None:
+        return
+    old_id = existing.garmin_workout_id
+    try:
+        ctx.client.delete_workout(old_id)
+    except Exception as exc:  # noqa: BLE001 — stale upload; still replace mapping
+        _log_push_failure("delete_workout", workout, exc, garmin_workout_id=old_id)
+        ctx.report.errors.append(f"Could not delete previous workout {old_id}: {exc}")
+    ctx.db.delete(existing)
+    ctx.week_mapping_ids.discard(str(old_id))
+    ctx.db.flush()
+
+
+def _foreign_collision_reason(workout: Workout, ctx: _PushContext) -> str | None:
+    """Skip reason when the date has workouts we did not create, else None."""
+    scheduled = ctx.client.get_workouts_for_date(workout.date)
+    collisions = [
+        s for s in scheduled if str(s["workoutId"]) not in ctx.week_mapping_ids
+    ]
+    if not collisions:
+        return None
+    names = ", ".join(c.get("name", "Unknown") for c in collisions)
+    return f"{workout.date.strftime('%A')} already has {names} — not ours, leaving it alone"
+
+
+def _push_workout(workout: Workout, ctx: _PushContext) -> None:
+    """Push a single workout, idempotently replacing a previous app upload."""
+    # 1. Delete any previous app-created workout for this (week, date).
+    _delete_previous_upload(workout, ctx)
 
     # 2. Collision check: are there workouts on this date we did not create?
-    scheduled = client.get_workouts_for_date(workout.date)
-    collisions = [s for s in scheduled if str(s["workoutId"]) not in week_mapping_ids]
-    if collisions:
-        names = ", ".join(c.get("name", "Unknown") for c in collisions)
-        report.skipped_dates.append(
-            {
-                "date": workout.date.isoformat(),
-                "reason": f"{workout.date.strftime('%A')} already has {names} — not ours, leaving it alone",
-            }
+    reason = _foreign_collision_reason(workout, ctx)
+    if reason is not None:
+        ctx.report.skipped_dates.append(
+            {"date": workout.date.isoformat(), "reason": reason}
         )
         return
 
     # 3. Upload and schedule.
     garmin_json = workout_to_garmin_json(workout)
-    garmin_id = client.schedule_workout(garmin_json, workout.date)
-
-    mapping = GarminWorkoutMapping(
-        week_plan_id=plan_id,
-        date=workout.date,
-        garmin_workout_id=garmin_id,
+    garmin_id = ctx.client.schedule_workout(garmin_json, workout.date)
+    ctx.db.add(
+        GarminWorkoutMapping(
+            week_plan_id=ctx.plan_id, date=workout.date, garmin_workout_id=garmin_id
+        )
     )
-    db.add(mapping)
     workout.status = "pushed"
-    db.flush()
+    ctx.db.flush()
 
-    week_mapping_ids.add(garmin_id)
-    report.pushed_dates.append(workout.date.isoformat())
+    ctx.week_mapping_ids.add(garmin_id)
+    ctx.report.pushed_dates.append(workout.date.isoformat())

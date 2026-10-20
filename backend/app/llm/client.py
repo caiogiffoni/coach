@@ -15,9 +15,27 @@ no test ever hits a real API. A missing API key raises
 generator treats as "go straight to the deterministic fallback".
 """
 
+import logging
 from typing import Protocol, runtime_checkable
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _log_llm_failure(provider: str, model: str, exc: Exception) -> None:
+    """Log a failed provider call; prompts and API keys are never logged."""
+    logger.warning(
+        "%s request failed: %s",
+        provider,
+        exc,
+        extra={
+            "dataset": "llm",
+            "provider": provider,
+            "model": model,
+            "error": repr(exc),
+        },
+    )
 
 
 class LLMError(Exception):
@@ -65,6 +83,7 @@ class KimiClient:
                 temperature=0.4,
             )
         except Exception as exc:  # openai raises its own exception hierarchy
+            _log_llm_failure("Kimi", self._model, exc)
             raise LLMError(f"Kimi request failed: {exc}") from exc
         content = resp.choices[0].message.content if resp.choices else None
         if not content:
@@ -94,6 +113,7 @@ class ClaudeClient:
                 messages=[{"role": "user", "content": prompt_user}],
             )
         except Exception as exc:  # anthropic raises its own exception hierarchy
+            _log_llm_failure("Claude", self._model, exc)
             raise LLMError(f"Claude request failed: {exc}") from exc
         text = "".join(block.text for block in msg.content if block.type == "text")
         if not text:

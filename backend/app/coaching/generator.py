@@ -15,15 +15,20 @@ app/llm/client.py), so tests pass a fake and never touch a real API.
 """
 
 import json
+import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from pydantic import ValidationError
 
 from ..llm.client import LLMClient
 from ..profile.models import Profile
-from .constraints import SessionSlot, WeekConstraints
+from .constraints import SessionSlot, TrainingState, WeekConstraints
 from .validator import GeneratedWeek, GeneratedWorkout, WorkoutStep, validate_week
+
+logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 
@@ -112,11 +117,8 @@ def _slot_lines(slot: SessionSlot) -> str:
     )
 
 
-def build_user_prompt(
-    constraints: WeekConstraints, profile: Profile, notes: str | None
-) -> str:
-    """Hard constraints + athlete context + strict output instruction."""
-    state = constraints.state
+def _constraint_lines(constraints: WeekConstraints) -> list[str]:
+    """The HARD CONSTRAINTS and SESSION DAYS sections of the prompt."""
     sections = ["# HARD CONSTRAINTS (never violate)"]
     sections.append(
         f"Week of {constraints.week_start}. Cycle: {constraints.cycle_week_type}."
@@ -137,16 +139,21 @@ def build_user_prompt(
         )
     sections.append("\n# SESSION DAYS (exactly one workout per date)")
     sections.extend(_slot_lines(s) for s in constraints.sessions)
+    return sections
 
-    sections.append("\n# ATHLETE CONTEXT")
+
+def _goal_line(constraints: WeekConstraints, profile: Profile) -> str:
     goal = f"Goal mode: {constraints.goal_mode}"
     if profile.goal_mode == "race" and profile.goal_race_date:
         goal += (
             f" — {profile.goal_race_distance} on {profile.goal_race_date}"
             f" (phase: {constraints.phase}, {constraints.weeks_to_race} weeks out)"
         )
-    sections.append(goal)
-    sections.append(
+    return goal
+
+
+def _recent_state_line(state: TrainingState) -> str:
+    return (
         "Recent state: "
         f"status {state.training_status or 'n/a'}, "
         f"ACWR {state.acwr if state.acwr is not None else 'n/a'}, "
@@ -157,6 +164,22 @@ def build_user_prompt(
         f"HRV {state.hrv_status or 'n/a'}, "
         f"sleep avg {state.sleep_avg_hours_7d or 'n/a'} h."
     )
+
+
+def build_user_prompt(
+    constraints: WeekConstraints, profile: Profile, notes: str | None
+) -> str:
+    """Hard constraints + athlete context + strict output instruction.
+
+    Example:
+        >>> prompt = build_user_prompt(constraints, profile, "sore calves")
+        >>> prompt.splitlines()[0]
+        '# HARD CONSTRAINTS (never violate)'
+    """
+    sections = _constraint_lines(constraints)
+    sections.append("\n# ATHLETE CONTEXT")
+    sections.append(_goal_line(constraints, profile))
+    sections.append(_recent_state_line(constraints.state))
     if notes:
         sections.append(f"\n# NOTES FROM THE ATHLETE\n{notes.strip()}")
     sections.append("\nRespond with the JSON week only, matching the schema exactly.")
@@ -200,36 +223,37 @@ def extract_json(text: str) -> str:
     return text.strip()
 
 
-def parse_week(raw: str) -> GeneratedWeek:
-    """Raw LLM text → GeneratedWeek. Raises ValueError with a readable msg."""
+_ParsedModel = TypeVar("_ParsedModel", GeneratedWeek, GeneratedWorkout)
+
+
+def _parse_llm_json(
+    raw: str, model: type[_ParsedModel], schema_name: str
+) -> _ParsedModel:
+    """Raw LLM text → ``model``. Raises ValueError with a readable msg."""
     try:
         data = json.loads(extract_json(raw))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Response is not valid JSON: {exc}") from exc
     try:
-        return GeneratedWeek.model_validate(data)
+        return model.model_validate(data)
     except ValidationError as exc:
         msgs = "; ".join(
             f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
             for e in exc.errors()[:5]
         )
-        raise ValueError(f"Response does not match the week schema: {msgs}") from exc
+        raise ValueError(
+            f"Response does not match the {schema_name} schema: {msgs}"
+        ) from exc
+
+
+def parse_week(raw: str) -> GeneratedWeek:
+    """Raw LLM text → GeneratedWeek. Raises ValueError with a readable msg."""
+    return _parse_llm_json(raw, GeneratedWeek, "week")
 
 
 def parse_workout(raw: str) -> GeneratedWorkout:
     """Single-workout variant for per-day regeneration."""
-    try:
-        data = json.loads(extract_json(raw))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Response is not valid JSON: {exc}") from exc
-    try:
-        return GeneratedWorkout.model_validate(data)
-    except ValidationError as exc:
-        msgs = "; ".join(
-            f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
-            for e in exc.errors()[:5]
-        )
-        raise ValueError(f"Response does not match the workout schema: {msgs}") from exc
+    return _parse_llm_json(raw, GeneratedWorkout, "workout")
 
 
 # ---------------------------------------------------------------------------
@@ -245,59 +269,59 @@ def _mid_pace(slot: SessionSlot) -> float:
     return _DEFAULT_EASY_PACE_SEC_PER_KM
 
 
+_FALLBACK_NAMES = {
+    "aerobic": "Easy aerobic run",
+    "quality": "Quality session",
+    "recovery": "Recovery jog",
+    "long": "Long run",
+}
+
+
+def _fallback_durations(slot: SessionSlot) -> tuple[float, float, float]:
+    """(warmup, main, cooldown) minutes so the derived distance lands mid-range."""
+    mid_km = (slot.distance_km_lo + slot.distance_km_hi) / 2
+    total_min = mid_km * _mid_pace(slot) / 60
+    warmup_min = min(10.0, total_min * 0.25)
+    cooldown_min = min(5.0, total_min * 0.15)
+    main_min = max(total_min - warmup_min - cooldown_min, 5.0)
+    return warmup_min, main_min, cooldown_min
+
+
+def _slot_step(
+    slot: SessionSlot, step_type: str, minutes: float, zone: str
+) -> WorkoutStep:
+    """One step carrying the slot's full HR and pace bounds."""
+    return WorkoutStep(
+        type=step_type,
+        duration_min=round(minutes, 1),
+        target_zone=zone,
+        target_pace_min=slot.pace_lo_sec_per_km,
+        target_pace_max=slot.pace_hi_sec_per_km,
+        target_hr_min=slot.hr_bpm_lo,
+        target_hr_max=slot.hr_bpm_hi,
+    )
+
+
 def fallback_workout(slot: SessionSlot) -> GeneratedWorkout:
     """
     Rule-based workout for one slot: 10-min Z1 warmup, main set sized so
     the derived distance lands mid-range at the slot's targets, 5-min Z1
     cooldown. Always passes the validator against its own slot.
-    """
-    mid_km = (slot.distance_km_lo + slot.distance_km_hi) / 2
-    pace = _mid_pace(slot)
-    total_min = mid_km * pace / 60
-    warmup_min = min(10.0, total_min * 0.25)
-    cooldown_min = min(5.0, total_min * 0.15)
-    main_min = max(total_min - warmup_min - cooldown_min, 5.0)
 
+    Example:
+        >>> fallback_workout(constraints.sessions[0]).name
+        'Easy aerobic run'
+    """
+    warmup_min, main_min, cooldown_min = _fallback_durations(slot)
     hi_zone = slot.hr_zone_range.split("-")[-1]  # e.g. "Z1-Z2" → "Z2"
     main_type = "interval" if slot.type == "quality" else "main"
-    names = {
-        "aerobic": "Easy aerobic run",
-        "quality": "Quality session",
-        "recovery": "Recovery jog",
-        "long": "Long run",
-    }
-
     steps = [
-        WorkoutStep(
-            type="warmup",
-            duration_min=round(warmup_min, 1),
-            target_zone="Z1",
-            target_pace_min=slot.pace_lo_sec_per_km,
-            target_pace_max=slot.pace_hi_sec_per_km,
-            target_hr_min=slot.hr_bpm_lo,
-            target_hr_max=slot.hr_bpm_hi,
-        ),
-        WorkoutStep(
-            type=main_type,
-            duration_min=round(main_min, 1),
-            target_zone=hi_zone,
-            target_pace_min=slot.pace_lo_sec_per_km,
-            target_pace_max=slot.pace_hi_sec_per_km,
-            target_hr_min=slot.hr_bpm_lo,
-            target_hr_max=slot.hr_bpm_hi,
-        ),
-        WorkoutStep(
-            type="cooldown",
-            duration_min=round(cooldown_min, 1),
-            target_zone="Z1",
-            target_pace_min=slot.pace_lo_sec_per_km,
-            target_pace_max=slot.pace_hi_sec_per_km,
-            target_hr_min=slot.hr_bpm_lo,
-            target_hr_max=slot.hr_bpm_hi,
-        ),
+        _slot_step(slot, "warmup", warmup_min, "Z1"),
+        _slot_step(slot, main_type, main_min, hi_zone),
+        _slot_step(slot, "cooldown", cooldown_min, "Z1"),
     ]
     return GeneratedWorkout(
-        name=names[slot.type],
+        name=_FALLBACK_NAMES[slot.type],
         date=slot.date,
         sport="running",
         duration_min=round(warmup_min + main_min + cooldown_min, 1),
@@ -317,6 +341,48 @@ def fallback_week(constraints: WeekConstraints) -> GeneratedWeek:
 # ---------------------------------------------------------------------------
 
 
+def _llm_week_with_retries(
+    llm: LLMClient,
+    prompt: str,
+    parse_candidate: Callable[[str], GeneratedWeek],
+    constraints: WeekConstraints,
+) -> GeneratedWeek | None:
+    """
+    Validator-in-the-loop: up to MAX_ATTEMPTS calls, each retry carrying the
+    previous attempt's errors. None when every attempt failed.
+    """
+    errors: list[str] = []
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        raw = llm.generate(
+            SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else "")
+        )
+        try:
+            week = parse_candidate(raw)
+            errors = validate_week(week, constraints)
+        except ValueError as exc:
+            # Not fatal: the message is fed back to the LLM on the next attempt.
+            logger.warning(
+                "LLM response rejected",
+                extra={
+                    "attempt": attempt,
+                    "max_attempts": MAX_ATTEMPTS,
+                    "error": str(exc),
+                },
+            )
+            errors = [str(exc)]
+        if not errors:
+            return week
+    return None
+
+
+def _fallback_result(
+    week: GeneratedWeek, constraints: WeekConstraints
+) -> GenerationResult:
+    return GenerationResult(
+        week=week, source="fallback", errors=validate_week(week, constraints)
+    )
+
+
 def generate_week(
     constraints: WeekConstraints,
     profile: Profile,
@@ -326,25 +392,25 @@ def generate_week(
     """
     LLM-generate a week with validator-in-the-loop retries, falling back to
     the deterministic week after MAX_ATTEMPTS failures or when `llm` is None.
+
+    Example:
+        >>> generate_week(constraints, profile, None, llm=None).source
+        'fallback'
     """
     if llm is not None:
         prompt = build_user_prompt(constraints, profile, notes)
-        errors: list[str] = []
-        for _ in range(MAX_ATTEMPTS):
-            raw = llm.generate(
-                SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else "")
-            )
-            try:
-                week = parse_week(raw)
-                errors = validate_week(week, constraints)
-            except ValueError as exc:
-                errors = [str(exc)]
-            if not errors:
-                return GenerationResult(week=week, source="llm")
-    week = fallback_week(constraints)
-    return GenerationResult(
-        week=week, source="fallback", errors=validate_week(week, constraints)
-    )
+        week = _llm_week_with_retries(llm, prompt, parse_week, constraints)
+        if week is not None:
+            return GenerationResult(week=week, source="llm")
+    return _fallback_result(fallback_week(constraints), constraints)
+
+
+def _with_workout(
+    current_week: GeneratedWeek, workout: GeneratedWorkout
+) -> GeneratedWeek:
+    """``current_week`` with ``workout`` replacing whatever was on its date."""
+    others = [w for w in current_week.workouts if w.date != workout.date]
+    return GeneratedWeek(workouts=sorted(others + [workout], key=lambda w: w.date))
 
 
 def generate_day(
@@ -361,26 +427,16 @@ def generate_day(
     still hold; on failure the slot's deterministic workout is used.
     """
 
-    def _swap(workout: GeneratedWorkout) -> GeneratedWeek:
-        others = [w for w in current_week.workouts if w.date != slot.date]
-        return GeneratedWeek(workouts=sorted(others + [workout], key=lambda w: w.date))
+    def _candidate_week(raw: str) -> GeneratedWeek:
+        candidate = parse_workout(raw)
+        candidate.date = slot.date  # the slot date wins over the LLM's
+        return _with_workout(current_week, candidate)
 
     if llm is not None:
         prompt = build_day_prompt(slot, constraints, profile, notes)
-        errors: list[str] = []
-        for _ in range(MAX_ATTEMPTS):
-            raw = llm.generate(
-                SYSTEM_PROMPT, prompt + (_retry_suffix(errors) if errors else "")
-            )
-            try:
-                candidate = parse_workout(raw)
-                candidate.date = slot.date  # the slot date wins over the LLM's
-                errors = validate_week(_swap(candidate), constraints)
-            except ValueError as exc:
-                errors = [str(exc)]
-            if not errors:
-                return GenerationResult(week=_swap(candidate), source="llm")
-    week = _swap(fallback_workout(slot))
-    return GenerationResult(
-        week=week, source="fallback", errors=validate_week(week, constraints)
+        week = _llm_week_with_retries(llm, prompt, _candidate_week, constraints)
+        if week is not None:
+            return GenerationResult(week=week, source="llm")
+    return _fallback_result(
+        _with_workout(current_week, fallback_workout(slot)), constraints
     )

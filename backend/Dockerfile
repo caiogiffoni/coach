@@ -24,6 +24,9 @@ COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY app ./app
+# Migrations run on startup (app.db.upgrade_database), so ship them too.
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 # Ensure data directory exists and is writable (SQLite DB, tokens, uploads)
 RUN mkdir -p /app/data && chmod 777 /app/data

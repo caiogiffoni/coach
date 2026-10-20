@@ -53,6 +53,23 @@ make format-backend   # backend ruff format + auto-fix
 make type-check-backend # backend mypy type check
 make build            # frontend production build
 make docker         # docker compose up --build
+make migrate        # apply pending DB migrations (also runs on backend startup)
+make migration msg="add foo column"  # autogenerate a migration from model changes
+```
+
+### Configuration
+
+- `SECRET_KEY` (JWT signing key) must be at least 32 bytes or the backend refuses to start. Generate one with `openssl rand -hex 32`. Using the built-in dev default logs a warning.
+- Failed logins are rate-limited in memory: 5 failures per client IP per 15 minutes returns `429` with a `Retry-After` header (`LOGIN_MAX_FAILURES`, `LOGIN_WINDOW_SECONDS`).
+- Backend logs are structured JSON on stdout (`LOG_LEVEL`, default `INFO`).
+
+### Database migrations
+
+The schema is managed by Alembic (`backend/alembic/`). On startup the backend runs `alembic upgrade head`; a database created before Alembic existed (tables present, no `alembic_version`) is stamped at the baseline revision first. After changing a model:
+
+```bash
+make migration msg="describe the change"   # review the generated file in backend/alembic/versions/
+make migrate
 ```
 
 ### First-run flow
@@ -95,7 +112,7 @@ cd backend && uv run pytest tests/ -q
 cd frontend && npm run build && npm run lint
 ```
 
-A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the backend tests (excluding the private real-data suite), builds the frontend, and builds the Docker image on every push/PR to `main`.
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs backend lint (`ruff check`, `ruff format --check`), `mypy app`, and the backend tests (excluding the private real-data suite), builds the frontend, and builds the Docker image on every push/PR to `main`.
 
 ## Backlog (explicitly out of v1)
 

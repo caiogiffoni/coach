@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
+from .rate_limit import LoginRateLimiter, client_ip, get_login_rate_limiter
 from .security import create_token, get_current_user, hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -53,11 +54,32 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> TokenRespo
     return TokenResponse(token=create_token(user.id))
 
 
+def _raise_if_locked_out(limiter: LoginRateLimiter, ip: str) -> None:
+    """Reject the request with 429 + Retry-After when ``ip`` is locked out."""
+    retry_after = limiter.retry_after_seconds(ip)
+    if retry_after == 0:
+        return
+    raise HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        f"Too many failed logins from {ip}; retry in {retry_after} s",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(
+    body: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
+) -> TokenResponse:
+    ip = client_ip(request)
+    _raise_if_locked_out(limiter, ip)
     user = db.scalar(select(User).where(User.email == body.email))
     if user is None or not verify_password(body.password, user.password_hash):
+        limiter.record_failure(ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    limiter.reset(ip)
     return TokenResponse(token=create_token(user.id))
 
 

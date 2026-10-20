@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..ingestion.api_pull import latest_local_date
 from ..profile.models import Profile
-from .constraints import compute_constraints
+from .constraints import TrainingState, WeekConstraints, compute_constraints
 from .plan_models import WeekPlan, Workout
 
 # ACWR threshold used as a secondary fatigue signal. Garmin's own status is
@@ -45,13 +45,56 @@ def _has_intensity_above_z2(workout: Workout) -> bool:
     return False
 
 
-def _acwr_reason(state) -> str | None:
+def _acwr_reason(state: TrainingState) -> str | None:
     """Extra fatigue signal from ACWR when Garmin's status flags a high load."""
     if state.acwr_status and state.acwr_status.upper() in {"HIGH", "VERY_HIGH"}:
         return f"ACWR status {state.acwr_status}"
     if state.acwr is not None and state.acwr > ACWR_HIGH_THRESHOLD:
         return f"ACWR {state.acwr:.2f} above {ACWR_HIGH_THRESHOLD}"
     return None
+
+
+def _planned_workout(
+    db: Session, profile: Profile, week_start: date, day_date: date
+) -> Workout:
+    """The stored workout for ``day_date``; ValueError when plan/day is missing."""
+    plan = db.scalar(
+        select(WeekPlan).where(
+            WeekPlan.week_start == week_start,
+            WeekPlan.user_id == profile.user_id,
+        )
+    )
+    if plan is None:
+        raise ValueError(f"No week plan found for {week_start}")
+    workout = next((w for w in plan.workouts if w.date == day_date), None)
+    if workout is None:
+        raise ValueError(f"No workout found for {day_date}")
+    return workout
+
+
+def _fresh_fatigue_reasons(fresh: WeekConstraints) -> list[str]:
+    """Reuse the constraint engine's fatigue signals plus ACWR."""
+    reasons = list(fresh.fatigue_reasons)
+    acwr = _acwr_reason(fresh.state)
+    if acwr:
+        reasons.append(acwr)
+    return reasons
+
+
+def _recommendation(
+    workout: Workout, fatigue_reasons: list[str], suggested_slot_type: str | None
+) -> tuple[str, str]:
+    """(recommendation, reason): veto beats swap beats proceed."""
+    # Veto: fatigue signal present and the workout still contains hard work.
+    if fatigue_reasons and _has_intensity_above_z2(workout):
+        return "veto", "; ".join(fatigue_reasons)
+    # Swap: the planned session type no longer matches the fresh constraints.
+    if suggested_slot_type is not None and workout.slot_type != suggested_slot_type:
+        return "swap", (
+            f"Planned {workout.slot_type} conflicts with fresh "
+            f"{suggested_slot_type} slot"
+        )
+    return "proceed", "Fresh data agrees with the planned session"
 
 
 def check_day_guard(
@@ -61,68 +104,28 @@ def check_day_guard(
     day_date: date,
     days_override: list[int] | None = None,
 ) -> DayGuardResult:
-    """Evaluate the stored workout for ``day_date`` against fresh data."""
+    """Evaluate the stored workout for ``day_date`` against fresh data.
+
+    Example:
+        >>> check_day_guard(db, profile, date(2026, 6, 1), date(2026, 6, 3))
+        DayGuardResult(date=..., recommendation='proceed', ...)
+    """
     fresh = compute_constraints(db, profile, week_start, days_override)
-
-    plan = db.scalar(
-        select(WeekPlan).where(
-            WeekPlan.week_start == week_start,
-            WeekPlan.user_id == profile.user_id,
-        )
-    )
-    if plan is None:
-        raise ValueError(f"No week plan found for {week_start}")
-
-    workout = next((w for w in plan.workouts if w.date == day_date), None)
-    if workout is None:
-        raise ValueError(f"No workout found for {day_date}")
-
-    # Fatigue reasons: reuse the constraint engine's signals plus ACWR.
-    fatigue_reasons = list(fresh.fatigue_reasons)
-    acwr = _acwr_reason(fresh.state)
-    if acwr:
-        fatigue_reasons.append(acwr)
-
+    workout = _planned_workout(db, profile, week_start, day_date)
+    fatigue_reasons = _fresh_fatigue_reasons(fresh)
     # Slot type according to the freshly computed constraints.
     fresh_slot = next((s for s in fresh.sessions if s.date == day_date), None)
     suggested_slot_type = fresh_slot.type if fresh_slot else None
-
     latest_date = latest_local_date(db) or date.today()
-    data_age_days = max(0, (day_date - latest_date).days)
-
-    # Veto: fatigue signal present and the workout still contains hard work.
-    if fatigue_reasons and _has_intensity_above_z2(workout):
-        return DayGuardResult(
-            date=day_date,
-            recommendation="veto",
-            reason="; ".join(fatigue_reasons),
-            current_slot_type=workout.slot_type,
-            suggested_slot_type=suggested_slot_type,
-            data_age_days=data_age_days,
-            fatigue_reasons=fatigue_reasons,
-        )
-
-    # Swap: the planned session type no longer matches the fresh constraints.
-    if suggested_slot_type is not None and workout.slot_type != suggested_slot_type:
-        return DayGuardResult(
-            date=day_date,
-            recommendation="swap",
-            reason=(
-                f"Planned {workout.slot_type} conflicts with fresh "
-                f"{suggested_slot_type} slot"
-            ),
-            current_slot_type=workout.slot_type,
-            suggested_slot_type=suggested_slot_type,
-            data_age_days=data_age_days,
-            fatigue_reasons=fatigue_reasons,
-        )
-
+    recommendation, reason = _recommendation(
+        workout, fatigue_reasons, suggested_slot_type
+    )
     return DayGuardResult(
         date=day_date,
-        recommendation="proceed",
-        reason="Fresh data agrees with the planned session",
+        recommendation=recommendation,
+        reason=reason,
         current_slot_type=workout.slot_type,
         suggested_slot_type=suggested_slot_type,
-        data_age_days=data_age_days,
+        data_age_days=max(0, (day_date - latest_date).days),
         fatigue_reasons=fatigue_reasons,
     )

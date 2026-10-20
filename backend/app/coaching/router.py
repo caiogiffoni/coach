@@ -13,10 +13,17 @@ from ..models import User
 from ..profile.models import Profile
 from ..profile.seed import has_imported_data
 from .constraints import WeekConstraints, compute_constraints
-from .generator import generate_day, generate_week
 from .guard import DayGuardResult, check_day_guard
-from .plan_models import WeekPlan, Workout
-from .validator import GeneratedWeek, GeneratedWorkout, WorkoutStep
+from .plan_models import WeekPlan
+from .week_service import (
+    SessionSlotMissingError,
+    WeekPlanError,
+    WeekPlanLockedError,
+    WeekPlanMissingError,
+    get_user_week_plan,
+    regenerate_plan_day,
+    regenerate_plan_week,
+)
 
 router = APIRouter(prefix="/api/coaching", tags=["coaching"])
 
@@ -117,49 +124,11 @@ def _profile_and_data(db: Session, user: User) -> Profile:
     return profile
 
 
-def _get_plan(db: Session, user: User, week_start: date) -> WeekPlan | None:
-    return db.scalar(
-        select(WeekPlan).where(
-            WeekPlan.user_id == user.id, WeekPlan.week_start == week_start
-        )
-    )
-
-
-def _to_generated(plan: WeekPlan) -> GeneratedWeek:
-    """Stored rows → the validator's week model (for re-validation)."""
-    return GeneratedWeek(
-        workouts=[
-            GeneratedWorkout(
-                name=w.name,
-                date=w.date,
-                sport=w.sport,
-                duration_min=w.duration_min,
-                description=w.description,
-                steps=[WorkoutStep.model_validate(s) for s in w.steps],
-            )
-            for w in plan.workouts
-        ]
-    )
-
-
-def _replace_workouts(
-    plan: WeekPlan, week: GeneratedWeek, constraints: WeekConstraints
-):
-    """Swap the plan's Workout rows for `week`'s (same session/transaction)."""
-    slots = {s.date: s for s in constraints.sessions}
-    plan.workouts.clear()
-    plan.workouts.extend(
-        Workout(
-            date=w.date,
-            name=w.name,
-            sport=w.sport,
-            duration_min=w.duration_min,
-            description=w.description,
-            steps=[s.model_dump(mode="json") for s in w.steps],
-            slot_type=slots[w.date].type,
-        )
-        for w in week.workouts
-    )
+_PLAN_ERROR_STATUS: dict[type[WeekPlanError], int] = {
+    WeekPlanMissingError: status.HTTP_404_NOT_FOUND,
+    SessionSlotMissingError: status.HTTP_404_NOT_FOUND,
+    WeekPlanLockedError: status.HTTP_409_CONFLICT,
+}
 
 
 @router.post("/weeks/generate", response_model=WeekPlanResponse)
@@ -176,53 +145,17 @@ def generate_week_plan(
     """
     profile = _profile_and_data(db, user)
     constraints = compute_constraints(db, profile, body.week, body.days)
-    plan = _get_plan(db, user, constraints.week_start)
-
-    if body.day_date is not None:
-        if plan is None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                "No plan for this week — generate the week first",
+    plan = get_user_week_plan(db, user.id, constraints.week_start)
+    try:
+        if body.day_date is not None:
+            return regenerate_plan_day(
+                db, plan, constraints, profile, body.day_date, body.notes, llm
             )
-        slot = next((s for s in constraints.sessions if s.date == body.day_date), None)
-        if slot is None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                f"No session slot on {body.day_date} for this week",
-            )
-        notes = body.notes if body.notes is not None else plan.notes
-        result = generate_day(
-            slot, constraints, profile, notes, llm, _to_generated(plan)
+        return regenerate_plan_week(
+            db, user.id, plan, constraints, profile, body.notes, llm
         )
-        _replace_workouts(plan, result.week, constraints)
-        plan.notes = notes
-        plan.validation_errors = result.errors
-        db.commit()
-        db.refresh(plan)
-        return plan
-
-    if plan is not None and plan.status != "draft":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Week {constraints.week_start} is already {plan.status}",
-        )
-    result = generate_week(constraints, profile, body.notes, llm)
-    if plan is not None:
-        db.delete(plan)  # children cascade; replaced in the same transaction
-        db.flush()
-    plan = WeekPlan(
-        user_id=user.id,
-        week_start=constraints.week_start,
-        goal_mode=constraints.goal_mode,
-        notes=body.notes or "",
-        source=result.source,
-        validation_errors=result.errors,
-    )
-    db.add(plan)
-    _replace_workouts(plan, result.week, constraints)
-    db.commit()
-    db.refresh(plan)
-    return plan
+    except WeekPlanError as exc:
+        raise HTTPException(_PLAN_ERROR_STATUS[type(exc)], str(exc)) from None
 
 
 @router.get("/weeks/{week_start}", response_model=WeekPlanResponse)
@@ -231,7 +164,7 @@ def get_week_plan(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WeekPlan:
-    plan = _get_plan(db, user, week_start)
+    plan = get_user_week_plan(db, user.id, week_start)
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No plan for this week")
     return plan
@@ -244,7 +177,7 @@ def approve_week_plan(
     user: User = Depends(get_current_user),
 ) -> WeekPlan:
     """Mark a draft week as reviewed → approved (draft→approved only)."""
-    plan = _get_plan(db, user, week_start)
+    plan = get_user_week_plan(db, user.id, week_start)
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No plan for this week")
     if plan.status != "draft":

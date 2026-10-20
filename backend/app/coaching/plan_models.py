@@ -3,7 +3,7 @@ Stored week plans (PLAN.md build-order step 5).
 
 One WeekPlan per user per week (unique constraint); regenerating a week
 replaces the existing DRAFT row and its workouts in one transaction (see
-router). Workout steps are stored as JSON — the schema is the validator's
+week_service.py). Workout steps are stored as JSON — the schema is the validator's
 WorkoutStep, serialized.
 """
 

@@ -1,4 +1,4 @@
-.PHONY: backend frontend dev install docker test test-backend test-frontend lint-backend format-backend type-check-backend build clean
+.PHONY: backend frontend dev install docker test test-backend test-frontend lint-backend format-backend type-check-backend build clean migrate migration
 
 backend:
 	cd backend && uv run uvicorn app.main:app --reload --port 8003
@@ -34,6 +34,15 @@ format-backend:
 
 type-check-backend:
 	cd backend && uv run mypy app tests
+
+# Apply pending migrations (the backend also does this on startup).
+migrate:
+	cd backend && uv run alembic upgrade head
+
+# Autogenerate a migration from model changes: make migration msg="add foo column"
+migration:
+	@test -n "$(msg)" || (echo 'usage: make migration msg="describe the change"' && exit 1)
+	cd backend && uv run alembic revision --autogenerate -m "$(msg)"
 
 build:
 	cd frontend && npm run build
