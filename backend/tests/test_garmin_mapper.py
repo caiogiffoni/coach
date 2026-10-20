@@ -76,6 +76,8 @@ def test_step_types_and_durations():
     assert steps[1]["stepType"]["stepTypeKey"] == "interval"
     assert steps[2]["stepType"]["stepTypeKey"] == "recovery"
     assert steps[3]["stepType"]["stepTypeKey"] == "rest"
+    # Regression: rest used to be sent with recovery's id (4).
+    assert steps[3]["stepType"]["stepTypeId"] == 5
     assert steps[4]["stepType"]["stepTypeKey"] == "cooldown"
     assert steps[5]["stepType"]["stepTypeKey"] == "interval"  # main maps to interval
 
@@ -188,5 +190,5 @@ def test_step_type_map_coverage():
     assert _STEP_TYPE_MAP["main"] == (3, "interval")
     assert _STEP_TYPE_MAP["interval"] == (3, "interval")
     assert _STEP_TYPE_MAP["recovery"] == (4, "recovery")
-    assert _STEP_TYPE_MAP["rest"] == (4, "rest")
+    assert _STEP_TYPE_MAP["rest"] == (5, "rest")
     assert _STEP_TYPE_MAP["cooldown"] == (2, "cooldown")

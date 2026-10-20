@@ -29,7 +29,9 @@ _STEP_TYPE_MAP = {
     "main": (3, "interval"),
     "interval": (3, "interval"),
     "recovery": (4, "recovery"),
-    "rest": (4, "rest"),
+    # Garmin's rest stepTypeId is 5 (garminconnect.workout.StepType.REST);
+    # it was previously sent as 4, which is recovery.
+    "rest": (5, "rest"),
     "cooldown": (2, "cooldown"),
 }
 

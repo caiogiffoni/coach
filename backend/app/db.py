@@ -25,6 +25,7 @@ MODEL_MODULES = (
     "app.garmin.models",
     "app.ingestion.models",
     "app.profile.models",
+    "app.workouts.models",
 )
 
 

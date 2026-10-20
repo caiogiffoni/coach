@@ -65,12 +65,22 @@ def test_fresh_db_is_not_unversioned(tmp_path):
     assert not is_unversioned_database(sqlite_url(tmp_path))
 
 
-def test_legacy_create_all_db_is_stamped_then_upgraded(tmp_path):
-    import_all_models()
-    url = sqlite_url(tmp_path)
+def make_legacy_db(url: str) -> None:
+    """Baseline schema without ``alembic_version``, i.e. a pre-Alembic DB.
+
+    Uses the baseline migration rather than today's ``create_all`` because
+    later migrations add tables a legacy DB never had.
+    """
+    command.upgrade(alembic_config(url), BASELINE_REVISION)
     engine = create_engine(url)
-    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE alembic_version"))
     engine.dispose()
+
+
+def test_legacy_create_all_db_is_stamped_then_upgraded(tmp_path):
+    url = sqlite_url(tmp_path)
+    make_legacy_db(url)
     assert is_unversioned_database(url)
     upgrade_database(url)
     assert not is_unversioned_database(url)

@@ -203,3 +203,71 @@ export interface DayGuardResult {
   data_age_days: number
   fatigue_reasons: string[]
 }
+
+// --- Workout library (builder) --------------------------------------------
+// Mirrors the workout builder API contract (/api/workouts).
+
+export type BuilderStepType = 'warmup' | 'run' | 'recover' | 'rest' | 'cooldown'
+
+export type BuilderStepEnd =
+  | { type: 'time'; seconds: number } // 1..86400
+  | { type: 'distance'; meters: number } // 1..100000
+  | { type: 'lap_button' }
+
+export type HrZoneNumber = 1 | 2 | 3 | 4 | 5
+
+export type BuilderStepTarget =
+  | { type: 'none' }
+  | { type: 'hr_zone'; zone: HrZoneNumber }
+  | { type: 'hr_range'; min_bpm: number; max_bpm: number } // 30..230, min < max
+  | { type: 'pace_range'; fast_sec_per_km: number; slow_sec_per_km: number } // 120..1200, fast < slow
+
+export interface BuilderStep {
+  kind: 'step'
+  step_type: BuilderStepType
+  end: BuilderStepEnd
+  target: BuilderStepTarget
+  notes: string // 0..200 chars
+}
+
+export interface RepeatBlock {
+  kind: 'repeat'
+  iterations: number // 2..50
+  steps: BuilderStep[] // 1..20, no nested repeats
+}
+
+export type WorkoutItem = BuilderStep | RepeatBlock
+
+export interface LibraryWorkoutInput {
+  name: string
+  description: string
+  steps: WorkoutItem[]
+}
+
+export interface LibraryWorkoutPush {
+  date: string // ISO date
+  garmin_workout_id: string
+  pushed_at: string
+}
+
+export interface LibraryWorkout {
+  id: number
+  name: string
+  description: string
+  steps: WorkoutItem[]
+  estimated_duration_sec: number | null
+  estimated_distance_m: number | null
+  created_at: string
+  updated_at: string
+  pushes: LibraryWorkoutPush[] // newest first
+}
+
+export interface LibraryWorkoutSummary {
+  id: number
+  name: string
+  description: string
+  step_count: number // leaf steps, repeats expanded
+  estimated_duration_sec: number | null
+  estimated_distance_m: number | null
+  updated_at: string
+}

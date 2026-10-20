@@ -5,6 +5,8 @@ import { Data } from './pages/Data'
 import { Login } from './pages/Login'
 import { Profile } from './pages/Profile'
 import { Week } from './pages/Week'
+import { WorkoutEditor } from './pages/WorkoutEditor'
+import { Workouts } from './pages/Workouts'
 
 export default function App() {
   return (
@@ -19,6 +21,30 @@ export default function App() {
           element={
             <RequireAuth>
               <Week />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/workouts"
+          element={
+            <RequireAuth>
+              <Workouts />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/workouts/new"
+          element={
+            <RequireAuth>
+              <WorkoutEditor />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/workouts/:id"
+          element={
+            <RequireAuth>
+              <WorkoutEditor />
             </RequireAuth>
           }
         />
