@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ChevronDown, ChevronUp, Copy, Trash2 } from 'lucide-react'
 
 interface ItemActionsProps {
@@ -8,12 +9,14 @@ interface ItemActionsProps {
   onMove: (direction: -1 | 1) => void
   onDuplicate: () => void
   onRemove: () => void
+  children?: ReactNode // extra item-specific buttons, rendered first
 }
 
 /** Move up / move down / duplicate / delete buttons for a step or repeat. */
-export function ItemActions({ label, canMoveUp, canMoveDown, canRemove, onMove, onDuplicate, onRemove }: ItemActionsProps) {
+export function ItemActions({ label, canMoveUp, canMoveDown, canRemove, onMove, onDuplicate, onRemove, children }: ItemActionsProps) {
   return (
     <div className="item-actions">
+      {children}
       <button type="button" className="icon-button icon-button-compact" onClick={() => onMove(-1)} disabled={!canMoveUp} aria-label={`Move ${label} up`} title="Move up">
         <ChevronUp size={16} strokeWidth={1.5} />
       </button>

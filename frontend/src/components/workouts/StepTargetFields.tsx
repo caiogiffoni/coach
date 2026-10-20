@@ -3,21 +3,21 @@ import type { StepDraft, TargetType } from '../../workoutBuilder'
 
 interface StepTargetFieldsProps {
   step: StepDraft
-  error?: string
+  label: string // e.g. "step 2" — used for accessible names
   hrZones: HrZone[] | null
   onChange: (patch: Partial<StepDraft>) => void
 }
 
 const TARGET_LABELS: Record<TargetType, string> = {
   none: 'No target',
-  hr_zone: 'Heart rate zone',
-  hr_range: 'Custom heart rate',
+  hr_zone: 'HR zone',
+  hr_range: 'HR range',
   pace_range: 'Pace',
 }
 
 const TARGET_UNITS: Partial<Record<TargetType, string>> = {
   hr_range: 'bpm',
-  pace_range: 'm:ss/km',
+  pace_range: '/km',
 }
 
 const ZONES: HrZoneNumber[] = [1, 2, 3, 4, 5]
@@ -36,7 +36,7 @@ function RangeInputs({ uid, fields }: { uid: string; fields: [RangeField, RangeF
         <input
           key={f.label}
           id={i === 0 ? `${uid}-target-value` : undefined}
-          className="input mono"
+          className="input mono builder-value"
           inputMode={f.placeholder.includes(':') ? 'text' : 'numeric'}
           aria-label={f.label}
           placeholder={f.placeholder}
@@ -83,8 +83,8 @@ function TargetValueInputs({ step, onChange }: Pick<StepTargetFieldsProps, 'step
       <RangeInputs
         uid={step.uid}
         fields={[
-          { label: 'Fast pace (m:ss per km)', placeholder: 'Fast 4:30', value: step.fastPaceText, onChange: (v) => onChange({ fastPaceText: v }) },
-          { label: 'Slow pace (m:ss per km)', placeholder: 'Slow 5:00', value: step.slowPaceText, onChange: (v) => onChange({ slowPaceText: v }) },
+          { label: 'Fast pace (m:ss per km)', placeholder: '4:30', value: step.fastPaceText, onChange: (v) => onChange({ fastPaceText: v }) },
+          { label: 'Slow pace (m:ss per km)', placeholder: '5:00', value: step.slowPaceText, onChange: (v) => onChange({ slowPaceText: v }) },
         ]}
       />
     )
@@ -92,46 +92,39 @@ function TargetValueInputs({ step, onChange }: Pick<StepTargetFieldsProps, 'step
   return null
 }
 
-/** "Z3 · 145–160 bpm" from the athlete's profile zones, when known. */
+/** "145–160 bpm" for the chosen zone from the athlete's profile zones, when known. */
 function ZoneHint({ zone, hrZones }: { zone: HrZoneNumber; hrZones: HrZone[] | null }) {
   const match = hrZones?.find((z) => z.zone === `Z${zone}`)
+  if (!match) return null
   return (
-    <span className="field-hint row">
-      <span className={`badge badge-z${zone}`}>Z{zone}</span>
-      {match && (
-        <span className="mono">
-          {match.min_bpm}–{match.max_bpm} bpm
-        </span>
-      )}
+    <span className="builder-unit mono">
+      {match.min_bpm}–{match.max_bpm} bpm
     </span>
   )
 }
 
-/** Garmin's "Intensity target" block: target type plus its zone/range values. */
-export function StepTargetFields({ step, error, hrZones, onChange }: StepTargetFieldsProps) {
+/** Garmin's "Intensity target" block, inline: target type plus its zone/range values. */
+export function StepTargetFields({ step, label, hrZones, onChange }: StepTargetFieldsProps) {
   const unit = TARGET_UNITS[step.targetType]
   return (
-    <div className="field">
-      <label className="field-label" htmlFor={`${step.uid}-target`}>
-        Intensity target{unit && <span className="mono"> ({unit})</span>}
-      </label>
-      <div className="builder-pair">
-        <select
-          id={`${step.uid}-target`}
-          className="select"
-          value={step.targetType}
-          onChange={(e) => onChange({ targetType: e.target.value as TargetType })}
-        >
-          {(Object.keys(TARGET_LABELS) as TargetType[]).map((t) => (
-            <option key={t} value={t}>
-              {TARGET_LABELS[t]}
-            </option>
-          ))}
-        </select>
-        <TargetValueInputs step={step} onChange={onChange} />
-      </div>
+    <div className="builder-field-group">
+      <select
+        id={`${step.uid}-target`}
+        className="select"
+        aria-label={`Intensity target of ${label}`}
+        title="Intensity target"
+        value={step.targetType}
+        onChange={(e) => onChange({ targetType: e.target.value as TargetType })}
+      >
+        {(Object.keys(TARGET_LABELS) as TargetType[]).map((t) => (
+          <option key={t} value={t}>
+            {TARGET_LABELS[t]}
+          </option>
+        ))}
+      </select>
+      <TargetValueInputs step={step} onChange={onChange} />
+      {unit && <span className="builder-unit mono">{unit}</span>}
       {step.targetType === 'hr_zone' && <ZoneHint zone={step.hrZone} hrZones={hrZones} />}
-      {error && <span className="field-error">{error}</span>}
     </div>
   )
 }

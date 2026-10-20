@@ -2,58 +2,54 @@ import type { EndType, StepDraft } from '../../workoutBuilder'
 
 interface StepEndFieldsProps {
   step: StepDraft
-  error?: string
+  label: string // e.g. "step 2" — used for accessible names
   onChange: (patch: Partial<StepDraft>) => void
 }
 
 const END_LABELS: Record<EndType, string> = {
   time: 'Time',
   distance: 'Distance',
-  lap_button: 'Lap button press',
+  lap_button: 'Lap press',
 }
 
-function EndValueInput({ step, onChange }: Omit<StepEndFieldsProps, 'error'>) {
-  if (step.endType === 'lap_button') {
-    return <p className="field-hint builder-lap-hint">Ends when you press Lap.</p>
-  }
+function EndValueInput({ step, onChange }: Omit<StepEndFieldsProps, 'label'>) {
+  if (step.endType === 'lap_button') return null
   const isTime = step.endType === 'time'
   return (
-    <input
-      id={`${step.uid}-end-value`}
-      className="input mono"
-      inputMode={isTime ? 'numeric' : 'decimal'}
-      aria-label={isTime ? 'Duration (m:ss)' : 'Distance (km)'}
-      placeholder={isTime ? 'm:ss' : 'km'}
-      value={isTime ? step.timeText : step.distanceKmText}
-      onChange={(e) => onChange(isTime ? { timeText: e.target.value } : { distanceKmText: e.target.value })}
-    />
+    <>
+      <input
+        id={`${step.uid}-end-value`}
+        className="input mono builder-value"
+        inputMode={isTime ? 'numeric' : 'decimal'}
+        aria-label={isTime ? 'Duration (m:ss)' : 'Distance (km)'}
+        placeholder={isTime ? 'm:ss' : 'km'}
+        value={isTime ? step.timeText : step.distanceKmText}
+        onChange={(e) => onChange(isTime ? { timeText: e.target.value } : { distanceKmText: e.target.value })}
+      />
+      {!isTime && <span className="builder-unit mono">km</span>}
+    </>
   )
 }
 
-/** Garmin's "Duration" block: how the step ends plus its time/distance value. */
-export function StepEndFields({ step, error, onChange }: StepEndFieldsProps) {
-  const unit = step.endType === 'time' ? 'm:ss' : step.endType === 'distance' ? 'km' : null
+/** Garmin's "Duration" block, inline: how the step ends plus its time/distance value. */
+export function StepEndFields({ step, label, onChange }: StepEndFieldsProps) {
   return (
-    <div className="field">
-      <label className="field-label" htmlFor={`${step.uid}-end`}>
-        End{unit && <span className="mono"> ({unit})</span>}
-      </label>
-      <div className="builder-pair">
-        <select
-          id={`${step.uid}-end`}
-          className="select"
-          value={step.endType}
-          onChange={(e) => onChange({ endType: e.target.value as EndType })}
-        >
-          {(Object.keys(END_LABELS) as EndType[]).map((t) => (
-            <option key={t} value={t}>
-              {END_LABELS[t]}
-            </option>
-          ))}
-        </select>
-        <EndValueInput step={step} onChange={onChange} />
-      </div>
-      {error && <span className="field-error">{error}</span>}
+    <div className="builder-field-group">
+      <select
+        id={`${step.uid}-end`}
+        className="select"
+        aria-label={`How ${label} ends`}
+        title="Ends by"
+        value={step.endType}
+        onChange={(e) => onChange({ endType: e.target.value as EndType })}
+      >
+        {(Object.keys(END_LABELS) as EndType[]).map((t) => (
+          <option key={t} value={t}>
+            {END_LABELS[t]}
+          </option>
+        ))}
+      </select>
+      <EndValueInput step={step} onChange={onChange} />
     </div>
   )
 }

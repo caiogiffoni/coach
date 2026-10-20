@@ -162,17 +162,24 @@
   gap: 8px;
 }
 
-/* Colored left edge per step type (tokens only). */
+/* Compact step row: [select] [type] [end] [target] [actions] on one line on
+   desktop; header + fields on narrow screens. Colored left edge per type. */
 .builder-step {
   --step-edge-color: var(--border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 4px;
+  padding: 4px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid var(--step-edge-color);
   border-radius: 6px;
+}
+
+.builder-step[data-selected] {
+  border-color: var(--accent);
+  border-left-color: var(--step-edge-color);
+  background: var(--accent-subtle);
 }
 
 .builder-step[data-step-type='warmup'] {
@@ -195,57 +202,100 @@
   --step-edge-color: var(--z2);
 }
 
-.builder-step .field {
-  margin-bottom: 0;
-}
-
-.builder-step-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.builder-step-type {
+.builder-step .input,
+.builder-step .select {
   width: auto;
-  font-weight: 600;
+  height: 28px;
+  padding: 2px 8px;
+  font-size: 13px;
 }
 
-.builder-step-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 16px;
-}
-
-.builder-pair {
+.builder-step-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
 }
 
-.builder-pair > * {
-  flex: 1 1 96px;
+.builder-step-type {
+  flex: none;
+  font-weight: 600;
+}
+
+.builder-step .builder-step-type {
+  width: 104px;
+}
+
+.builder-step-fields {
+  flex: 1 1 360px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.builder-field-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
-.builder-pair > .select {
-  flex-basis: 150px;
+.builder-step .builder-value {
+  width: 64px;
 }
 
-.builder-lap-hint {
-  padding: 8px 0;
+.builder-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
-/* Repeat blocks: a --surface-2 fill, not a nested card. */
+.item-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.builder-step-errors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.builder-step .builder-notes {
+  width: 100%;
+}
+
+/* Repeat blocks: a --surface-2 fill, not a nested card; children indented. */
 .builder-repeat {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 4px;
+  padding: 4px 8px 8px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.builder-repeat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.builder-repeat-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 16px;
+}
+
+.builder-repeat-children .builder-step {
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
 }
 
 .builder-repeat-count {
@@ -256,7 +306,15 @@
 }
 
 .builder-repeat-count .input {
-  width: 56px;
+  width: 48px;
+}
+
+.builder-group-toolbar {
+  margin-bottom: 8px;
+}
+
+.builder-group-iterations {
+  font-weight: 500;
 }
 
 .builder-items-error {
@@ -290,11 +348,24 @@
     white-space: nowrap;
   }
 
-  .builder-step-grid {
-    grid-template-columns: 1fr;
+  /* Row 1: checkbox, type, actions. Row 2: end + target (wraps if needed). */
+  .builder-step .builder-step-type {
+    flex: 1 1 0;
+    min-width: 72px;
+    max-width: 136px;
   }
 
-  .builder-step {
-    padding: 12px;
+  .builder-step-fields {
+    order: 3;
+    flex-basis: 100%;
+    gap: 4px 12px;
+  }
+
+  .builder-field-group {
+    flex-wrap: wrap;
+  }
+
+  .builder-repeat-children {
+    padding-left: 8px;
   }
 }
