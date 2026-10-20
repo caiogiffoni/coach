@@ -87,6 +87,70 @@ def _workout_distance_km(workout: GeneratedWorkout, slot: SessionSlot) -> float 
     return sum(known) if known else None
 
 
+def _check_step_schema(
+    step: WorkoutStep, label: str, constraints: WeekConstraints
+) -> list[str]:
+    """Durations, step-type / zone enums and the fatigue-veto zone cap."""
+    errors = []
+    if step.duration_min <= 0:
+        errors.append(f"{label}: duration must be positive")
+    if step.type not in STEP_TYPES:
+        errors.append(
+            f"{label}: unknown step type {step.type!r} "
+            f"(allowed: {', '.join(STEP_TYPES)})"
+        )
+    if step.target_zone is not None and step.target_zone not in ZONES:
+        errors.append(f"{label}: unknown zone {step.target_zone!r} (Z1-Z5)")
+    if constraints.fatigue_veto and step.target_zone in HARD_ZONES:
+        errors.append(
+            f"{label}: {step.target_zone} is not allowed — fatigue veto "
+            "is active, nothing above Z2 this week"
+        )
+    return errors
+
+
+def _check_step_hr(step: WorkoutStep, slot: SessionSlot, label: str) -> list[str]:
+    # HR bounds (only where the slot has them). Bookend steps may dip
+    # below the floor; nothing may exceed the ceiling.
+    errors = []
+    hr_max, ceiling = step.target_hr_max, slot.hr_bpm_hi
+    if hr_max is not None and ceiling is not None and hr_max > ceiling:
+        errors.append(
+            f"{label}: HR target up to {hr_max} bpm exceeds "
+            f"the slot ceiling {ceiling} bpm ({slot.hr_zone_range})"
+        )
+    hr_min, floor = step.target_hr_min, slot.hr_bpm_lo
+    if step.type in _EASY_BOOKENDS or hr_min is None or floor is None:
+        return errors
+    if hr_min < floor:
+        errors.append(
+            f"{label}: HR target from {hr_min} bpm is below "
+            f"the slot floor {floor} bpm ({slot.hr_zone_range})"
+        )
+    return errors
+
+
+def _check_step_pace(step: WorkoutStep, slot: SessionSlot, label: str) -> list[str]:
+    # Pace bounds, sec/km: lower = faster. Bookends may run slower than
+    # the slow bound; nothing may run faster than the fast bound.
+    errors = []
+    fastest, fast_bound = step.target_pace_min, slot.pace_lo_sec_per_km
+    if fastest is not None and fast_bound is not None and fastest < fast_bound:
+        errors.append(
+            f"{label}: pace target down to {fastest} s/km is "
+            f"faster than the slot allows ({fast_bound} s/km)"
+        )
+    slowest, slow_bound = step.target_pace_max, slot.pace_hi_sec_per_km
+    if step.type in _EASY_BOOKENDS or slowest is None or slow_bound is None:
+        return errors
+    if slowest > slow_bound:
+        errors.append(
+            f"{label}: pace target up to {slowest} s/km is "
+            f"slower than the slot allows ({slow_bound} s/km)"
+        )
+    return errors
+
+
 def _check_steps(
     workout: GeneratedWorkout, slot: SessionSlot | None, constraints: WeekConstraints
 ) -> list[str]:
@@ -94,77 +158,37 @@ def _check_steps(
     errors = []
     for i, step in enumerate(workout.steps):
         label = f"{workout.date} '{workout.name}' step {i + 1} ({step.type!r})"
-        if step.duration_min <= 0:
-            errors.append(f"{label}: duration must be positive")
-        if step.type not in STEP_TYPES:
-            errors.append(
-                f"{label}: unknown step type {step.type!r} "
-                f"(allowed: {', '.join(STEP_TYPES)})"
-            )
-        if step.target_zone is not None and step.target_zone not in ZONES:
-            errors.append(f"{label}: unknown zone {step.target_zone!r} (Z1-Z5)")
-        if constraints.fatigue_veto and step.target_zone in HARD_ZONES:
-            errors.append(
-                f"{label}: {step.target_zone} is not allowed — fatigue veto "
-                "is active, nothing above Z2 this week"
-            )
+        errors.extend(_check_step_schema(step, label, constraints))
         if slot is None:
             continue
-        # HR bounds (only where the slot has them). Bookend steps may dip
-        # below the floor; nothing may exceed the ceiling.
-        if step.target_hr_max is not None and slot.hr_bpm_hi is not None:
-            if step.target_hr_max > slot.hr_bpm_hi:
-                errors.append(
-                    f"{label}: HR target up to {step.target_hr_max} bpm exceeds "
-                    f"the slot ceiling {slot.hr_bpm_hi} bpm ({slot.hr_zone_range})"
-                )
-        if (
-            step.type not in _EASY_BOOKENDS
-            and step.target_hr_min is not None
-            and slot.hr_bpm_lo is not None
-            and step.target_hr_min < slot.hr_bpm_lo
-        ):
-            errors.append(
-                f"{label}: HR target from {step.target_hr_min} bpm is below "
-                f"the slot floor {slot.hr_bpm_lo} bpm ({slot.hr_zone_range})"
-            )
-        # Pace bounds, sec/km: lower = faster. Bookends may run slower than
-        # the slow bound; nothing may run faster than the fast bound.
-        if step.target_pace_min is not None and slot.pace_lo_sec_per_km is not None:
-            if step.target_pace_min < slot.pace_lo_sec_per_km:
-                errors.append(
-                    f"{label}: pace target down to {step.target_pace_min} s/km is "
-                    f"faster than the slot allows ({slot.pace_lo_sec_per_km} s/km)"
-                )
-        if (
-            step.type not in _EASY_BOOKENDS
-            and step.target_pace_max is not None
-            and slot.pace_hi_sec_per_km is not None
-            and step.target_pace_max > slot.pace_hi_sec_per_km
-        ):
-            errors.append(
-                f"{label}: pace target up to {step.target_pace_max} s/km is "
-                f"slower than the slot allows ({slot.pace_hi_sec_per_km} s/km)"
-            )
+        errors.extend(_check_step_hr(step, slot, label))
+        errors.extend(_check_step_pace(step, slot, label))
     return errors
 
 
-def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str]:
-    """All guardrail errors for `week`; empty list = valid."""
-    errors: list[str] = []
-    slots = {s.date: s for s in constraints.sessions}
-    week_end = constraints.week_start + timedelta(days=6)
-
-    # --- one workout per slot date, none elsewhere, all within the week ---
+def _workouts_by_date(week: GeneratedWeek) -> dict[date, list[GeneratedWorkout]]:
     by_date: dict[date, list[GeneratedWorkout]] = {}
     for workout in week.workouts:
         by_date.setdefault(workout.date, []).append(workout)
+    return by_date
+
+
+def _check_slot_coverage(
+    week: GeneratedWeek,
+    constraints: WeekConstraints,
+    by_date: dict[date, list[GeneratedWorkout]],
+) -> list[str]:
+    """One workout per slot date, none elsewhere, all within the week."""
+    errors = []
+    slot_dates = {s.date for s in constraints.sessions}
+    week_end = constraints.week_start + timedelta(days=6)
+    for workout in week.workouts:
         if not (constraints.week_start <= workout.date <= week_end):
             errors.append(
                 f"{workout.date} '{workout.name}': outside the week "
                 f"{constraints.week_start} – {week_end}"
             )
-        elif workout.date not in slots:
+        elif workout.date not in slot_dates:
             errors.append(
                 f"{workout.date} '{workout.name}': no session slot on this day "
                 "(not an allowed training day)"
@@ -175,27 +199,28 @@ def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str
             errors.append(f"{slot.date}: missing workout for the {slot.type} slot")
         elif len(found) > 1:
             errors.append(f"{slot.date}: {len(found)} workouts for one slot")
+    return errors
 
-    # --- distances: per-workout, intensity budget, total volume ---
-    total_km = quality_km = 0.0
-    for workout in week.workouts:
-        workout_slot = slots.get(workout.date)
-        if workout_slot is None:
-            continue
-        distance = _workout_distance_km(workout, workout_slot)
-        if distance is None:
-            continue  # no pace info anywhere — distance checks skipped
-        total_km += distance
-        lo = workout_slot.distance_km_lo * (1 - DISTANCE_TOLERANCE)
-        hi = workout_slot.distance_km_hi * (1 + DISTANCE_TOLERANCE)
-        if not (lo <= distance <= hi):
-            errors.append(
-                f"{workout.date} '{workout.name}': ~{distance:.1f} km is outside "
-                f"the {workout_slot.type} slot range {workout_slot.distance_km_lo}-"
-                f"{workout_slot.distance_km_hi} km"
-            )
-        if workout_slot.type == "quality":
-            quality_km += distance
+
+def _check_workout_distance(
+    workout: GeneratedWorkout, slot: SessionSlot, distance: float
+) -> list[str]:
+    lo = slot.distance_km_lo * (1 - DISTANCE_TOLERANCE)
+    hi = slot.distance_km_hi * (1 + DISTANCE_TOLERANCE)
+    if lo <= distance <= hi:
+        return []
+    return [
+        f"{workout.date} '{workout.name}': ~{distance:.1f} km is outside "
+        f"the {slot.type} slot range {slot.distance_km_lo}-"
+        f"{slot.distance_km_hi} km"
+    ]
+
+
+def _check_week_totals(
+    constraints: WeekConstraints, total_km: float, quality_km: float
+) -> list[str]:
+    """Intensity budget (80/20) and total volume against the slot upper bounds."""
+    errors = []
     if quality_km > constraints.intensity_budget_km + SUM_TOLERANCE_KM:
         errors.append(
             f"Quality sessions total ~{quality_km:.1f} km, over the intensity "
@@ -207,12 +232,28 @@ def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str
             f"Total volume ~{total_km:.1f} km exceeds the weekly target upper "
             f"bound of {volume_hi:.1f} km"
         )
+    return errors
 
-    # --- per-step checks ---
+
+def _check_distances(
+    week: GeneratedWeek, constraints: WeekConstraints, slots: dict[date, SessionSlot]
+) -> list[str]:
+    """Distances: per-workout, intensity budget, total volume."""
+    errors: list[str] = []
+    total_km = quality_km = 0.0
     for workout in week.workouts:
-        errors.extend(_check_steps(workout, slots.get(workout.date), constraints))
+        slot = slots.get(workout.date)
+        distance = _workout_distance_km(workout, slot) if slot is not None else None
+        if slot is None or distance is None:
+            continue  # no slot, or no pace info anywhere — distance checks skipped
+        total_km += distance
+        errors.extend(_check_workout_distance(workout, slot, distance))
+        if slot.type == "quality":
+            quality_km += distance
+    return errors + _check_week_totals(constraints, total_km, quality_km)
 
-    # --- hard-day guardrails (mirror of the constraint engine's rules) ---
+
+def _check_hard_days(week: GeneratedWeek, slots: dict[date, SessionSlot]) -> list[str]:
     # A day counts as hard when its slot is a quality slot, or the LLM
     # smuggled intensity (Z4+) into an easy slot. Z3 tops out long/aerobic
     # slots by design, so Z3 alone does not make a day hard.
@@ -222,20 +263,43 @@ def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str
         smuggled = any(s.target_zone in ("Z4", "Z5") for s in workout.steps)
         if (slot_opt and slot_opt.type == "quality") or smuggled:
             hard_dates.add(workout.date)
-    if len(hard_dates) > 2:
-        errors.append(
-            f"{len(hard_dates)} hard days — max 2 per week "
-            f"({', '.join(str(d) for d in sorted(hard_dates))})"
-        )
+    if len(hard_dates) <= 2:
+        return []
+    return [
+        f"{len(hard_dates)} hard days — max 2 per week "
+        f"({', '.join(str(d) for d in sorted(hard_dates))})"
+    ]
 
-    if constraints.injury_flags:
-        days_sorted = sorted(by_date)
-        for a, b in zip(days_sorted, days_sorted[1:]):
-            if (b - a).days == 1:
-                errors.append(
-                    f"Back-to-back runs {a} and {b} with injury flag "
-                    f"'{constraints.injury_flags[0]}' — consecutive run days "
-                    "are not allowed"
-                )
 
+def _check_injury_adjacency(
+    workout_dates: list[date], constraints: WeekConstraints
+) -> list[str]:
+    if not constraints.injury_flags:
+        return []
+    days_sorted = sorted(workout_dates)
+    return [
+        f"Back-to-back runs {a} and {b} with injury flag "
+        f"'{constraints.injury_flags[0]}' — consecutive run days "
+        "are not allowed"
+        for a, b in zip(days_sorted, days_sorted[1:])
+        if (b - a).days == 1
+    ]
+
+
+def validate_week(week: GeneratedWeek, constraints: WeekConstraints) -> list[str]:
+    """All guardrail errors for `week`; empty list = valid.
+
+    Example:
+        >>> validate_week(fallback_week(constraints), constraints)
+        []
+    """
+    slots = {s.date: s for s in constraints.sessions}
+    by_date = _workouts_by_date(week)
+    errors = _check_slot_coverage(week, constraints, by_date)
+    errors += _check_distances(week, constraints, slots)
+    for workout in week.workouts:
+        errors.extend(_check_steps(workout, slots.get(workout.date), constraints))
+    # Hard-day guardrails mirror the constraint engine's rules.
+    errors += _check_hard_days(week, slots)
+    errors += _check_injury_adjacency(list(by_date), constraints)
     return errors
