@@ -47,7 +47,7 @@ coach/
 
 - **Runtime:** Python 3.12, managed with `uv`.
 - **Framework:** FastAPI + Uvicorn.
-- **Database:** SQLite via SQLAlchemy 2.0 (declarative ORM, `Mapped` columns).
+- **Database:** SQLite via SQLAlchemy 2.0 (declarative ORM, `Mapped` columns); Alembic migrations.
 - **Auth:** JWT (HS256) with `bcrypt` password hashing.
 - **Validation:** Pydantic v2, Pydantic-Settings for env loading.
 - **LLM:** Provider-agnostic client.
@@ -78,9 +78,10 @@ coach/
 
 | Module | Responsibility |
 |--------|----------------|
-| `main.py` | FastAPI factory, router registration, `Base.metadata.create_all`. |
+| `main.py` | FastAPI app, router registration, JSON logging setup, lifespan that runs Alembic migrations. |
 | `config.py` | `pydantic_settings.BaseSettings`; loads `backend/.env`. |
-| `db.py` | SQLAlchemy engine, `SessionLocal`, `get_db()` dependency, `Base`. |
+| `db.py` | SQLAlchemy engine, `SessionLocal`, `get_db()` dependency, `Base`, model registry, `upgrade_database()`. |
+| `logging_config.py` | Stdlib JSON log formatter + `configure_logging()`. |
 | `models.py` | Shared `User` model. |
 | `auth/` | Register/login (closes after first user), JWT security, `/api/auth/*`. |
 | `ingestion/` | Import GDPR export, upload `.zip`/`.fit`, sync from Garmin API; stores normalized rows. |
@@ -89,7 +90,7 @@ coach/
 | `garmin/` | Garmin client wrapper, workout mapper, idempotent push, `/api/garmin/*`. |
 | `llm/` | Provider-agnostic client (`kimi`/`claude`) and `get_llm_client` dependency. |
 
-Models live next to their routers (e.g. `app/profile/models.py`). They are imported in `main.py` with `# noqa: F401` so SQLAlchemy registers all tables before `create_all`.
+Models live next to their routers (e.g. `app/profile/models.py`). They are listed in `MODEL_MODULES` in `app/db.py`; `import_all_models()` registers them for Alembic and the tests' `create_all`.
 
 ### Frontend (`frontend/src/`)
 
@@ -156,6 +157,8 @@ make test-frontend     # frontend build + lint only
 make lint-backend      # ruff check
 make format-backend    # ruff format + auto-fix
 make type-check-backend # mypy
+make migrate           # alembic upgrade head
+make migration msg=".." # alembic revision --autogenerate
 make build             # frontend production build
 make docker            # docker compose up --build
 make clean             # remove data, node_modules, dist, venv
@@ -218,13 +221,14 @@ Backend tests run with `pythonpath = ["."]` (configured in `pyproject.toml`).
 
 - **Secrets live in `backend/.env`** and are never committed (`.gitignore` ignores `.env` and `backend/data/`).
 - **Critical env vars:**
-  - `SECRET_KEY` — JWT signing key; must be ≥32 bytes in production.
+  - `SECRET_KEY` — JWT signing key; must be ≥32 bytes or Settings validation fails at startup. The built-in dev default logs a warning.
   - `GARMIN_EMAIL` / `GARMIN_PASSWORD` — Garmin credentials; optional until push/sync is used.
   - `LLM_API_KEY` — LLM provider key; optional; missing key triggers deterministic fallback.
 - **Auth:** Registration closes once one user exists (`/api/auth/status`). Passwords are bcrypt-hashed.
 - **Garmin tokens** are cached on disk at `GARMIN_TOKEN_STORE` (`backend/data/garmin_tokens` locally); nothing Garmin-related is stored in the DB.
 - **Uploads:** Temporary files go to `UPLOAD_DIR` (`backend/data/uploads`) and are cleaned up per request.
-- **Database:** SQLite file lives in `backend/data/coach.db` (or `/app/data/coach.db` in Docker). No migrations tooling is configured yet.
+- **Database:** SQLite file lives in `backend/data/coach.db` (or `/app/data/coach.db` in Docker). Schema migrations are managed by Alembic.
+- **Login rate limit:** `app/auth/rate_limit.py` keeps an in-memory, per-IP failure counter (5 per 15 min by default) and returns `429` + `Retry-After`. Inject/override it through the `get_login_rate_limiter` dependency.
 - **Tests:** Real external APIs are never called in tests thanks to dependency overrides.
 
 ---
@@ -233,7 +237,7 @@ Backend tests run with `pythonpath = ["."]` (configured in `pyproject.toml`).
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
 
-1. **Backend job:** `uv sync` → `pytest -m "not realdata"`.
+1. **Backend job:** `uv sync` → `ruff check .` → `ruff format --check .` → `mypy app` → `pytest -m "not realdata"`.
 2. **Frontend job:** `npm ci` → `npm run build` → `npm run lint`.
 3. **Docker job:** `docker build -t coach-backend:latest backend/`.
 
@@ -317,7 +321,7 @@ Push and auto-sync require real Garmin credentials; the daily guard and workout 
 
 ## Logging
 
-- Structured JSON when logging for debugging / observability.
+- Structured JSON when logging for debugging / observability. `app/logging_config.py` installs a stdlib `JsonFormatter` on the root logger at startup; use `logging.getLogger(__name__)` and pass context via `extra={...}` (each key becomes a top-level JSON field).
 - Plain text only for user-facing CLI output.
 
 ---
@@ -326,7 +330,7 @@ Push and auto-sync require real Garmin credentials; the daily guard and workout 
 
 - **Read before editing:** Router schemas, Pydantic models, and the frontend `types.ts` must stay in sync. If you change one, update the others.
 - **Run the checks:** After any code change run `make test` (or at least the relevant backend/frontend checks) before finishing.
-- **Database changes:** SQLAlchemy creates tables on startup via `Base.metadata.create_all`. If you add models or columns, the app will create them on the next start for a fresh DB; existing SQLite files will need manual migration or deletion.
+- **Database changes:** The schema is managed by Alembic (`backend/alembic/`, `backend/alembic.ini`). The app runs `alembic upgrade head` on startup (FastAPI lifespan → `app.db.upgrade_database`); pre-Alembic DBs made by `create_all` are stamped at the baseline revision first. After adding/changing models or columns, run `make migration msg="..."`, review the generated file, and commit it. New model modules must be added to `MODEL_MODULES` in `app/db.py` so autogenerate and tests see them. `tests/test_migrations.py` fails if models drift from the migrations. Tests still use in-memory `create_all`.
 - **LLM fallback:** It is fine to run without an LLM key — the generator falls back to deterministic workouts. This is also the test default.
 - **Garmin mocking:** The `GarminClient` protocol in `app/garmin/client.py` is the seam for fakes; tests in `tests/test_end_to_end.py` show the expected interface.
 - **`temp/` is a workspace:** It holds prototype scripts and the private Garmin export. It is gitignored; do not treat it as production code.
