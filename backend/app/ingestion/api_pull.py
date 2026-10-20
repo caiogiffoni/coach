@@ -3,7 +3,8 @@ Auto-pull recent data from Garmin Connect into the normalized SQLite store.
 
 Uses the dependency-injected ``GarminClient`` protocol so tests can substitute
 a fake client. Each dataset is pulled for a configurable look-back window,
-transformed into the same kwargs used by ``export_import.py``, and upserted on
+transformed (``api_transform.py``) into the same kwargs used by
+``export_import.py``, and upserted on
 its natural key. If a particular Garmin endpoint is unavailable in the
 installed ``python-garminconnect`` version, the sync records that in
 ``SyncReport.skipped_datasets`` instead of crashing.
@@ -12,14 +13,24 @@ installed ``python-garminconnect`` version, the sync records that in
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..garmin.client import GarminClient
-from .export_import import _ms_to_dt, _parse_date, _upsert_many
+from .api_transform import (
+    _transform_activities,
+    _transform_daily_wellness,
+    _transform_hrv,
+    _transform_training_load,
+    _transform_training_readiness,
+)
+from .export_parsing import _upsert_many
 from .models import (
     Activity,
     DailyWellness,
@@ -72,199 +83,93 @@ def latest_local_date(db: Session) -> date | None:
 
 
 # ---------------------------------------------------------------------------
-# Transformers (Garmin Connect raw dict -> model kwargs)
-#
-# These are intentionally defensive: Garmin's JSON shape varies by account,
-# firmware, and library version. Missing fields become None, which the models
-# accept.
-# ---------------------------------------------------------------------------
-
-
-def _transform_activities(raw: list[dict]) -> list[dict]:
-    rows = []
-    for a in raw:
-        if not isinstance(a, dict):
-            continue
-        activity_id = a.get("activityId")
-        if activity_id is None:
-            continue
-        duration = a.get("duration")
-        distance = a.get("distance")
-        elevation = a.get("elevationGain")
-        rows.append(
-            {
-                "activity_id": activity_id,
-                "name": a.get("name"),
-                "activity_type": a.get("activityType"),
-                "sport_type": a.get("sportType"),
-                "start_time_gmt": _ms_to_dt(a.get("startTimeGmt")),
-                "start_time_local": _ms_to_dt(a.get("startTimeLocal")),
-                "duration_min": duration / 60_000 if duration is not None else None,
-                "distance_km": distance / 100_000 if distance is not None else None,
-                "elevation_gain_m": elevation / 100 if elevation is not None else None,
-                "avg_hr": a.get("avgHr"),
-                "max_hr": a.get("maxHr"),
-                "min_hr": a.get("minHr"),
-                "calories": a.get("calories"),
-                "vo2max_value": a.get("vO2MaxValue"),
-                "aerobic_training_effect": a.get("aerobicTrainingEffect"),
-                "anaerobic_training_effect": a.get("anaerobicTrainingEffect"),
-                "training_load": a.get("activityTrainingLoad"),
-                "lap_count": a.get("lapCount"),
-                "is_pr": a.get("pr"),
-            }
-        )
-    return rows
-
-
-def _to_int(value) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _transform_daily_wellness(raw: list[dict]) -> list[dict]:
-    by_date: dict[date, dict] = {}
-    for rec in raw:
-        if not isinstance(rec, dict):
-            continue
-        cal = _parse_date(rec.get("calendarDate"))
-        if cal is None:
-            continue
-
-        # Some Garmin endpoints nest stress data; unwrap common shapes.
-        stress = rec.get("allDayStress") or {}
-        if not isinstance(stress, dict):
-            stress = {}
-        agg_list = stress.get("aggregatorList") or []
-        total = next(
-            (a for a in agg_list if isinstance(a, dict) and a.get("type") == "TOTAL"),
-            {},
-        )
-
-        body_battery = rec.get("bodyBattery") or {}
-        if not isinstance(body_battery, dict):
-            body_battery = {}
-        stat_map = {
-            s["bodyBatteryStatType"]: s["statsValue"]
-            for s in body_battery.get("bodyBatteryStatList", [])
-            if isinstance(s, dict) and "statsValue" in s
-        }
-
-        by_date[cal] = {
-            "calendar_date": cal,
-            "total_steps": _to_int(rec.get("totalSteps")),
-            "daily_step_goal": _to_int(rec.get("dailyStepGoal")),
-            "total_distance_m": rec.get("totalDistanceMeters"),
-            "total_kcal": rec.get("totalKilocalories"),
-            "active_kcal": rec.get("activeKilocalories"),
-            "resting_hr": _to_int(rec.get("restingHeartRate")),
-            "min_hr": _to_int(rec.get("minHeartRate")),
-            "max_hr": _to_int(rec.get("maxHeartRate")),
-            "highly_active_seconds": _to_int(rec.get("highlyActiveSeconds")),
-            "active_seconds": _to_int(rec.get("activeSeconds")),
-            "floors_ascended_m": rec.get("floorsAscendedInMeters"),
-            "avg_stress": _to_int(total.get("averageStressLevel")),
-            "max_stress": _to_int(total.get("maxStressLevel")),
-            "stress_duration_s": _to_int(total.get("stressDuration")),
-            "rest_duration_s": _to_int(total.get("restDuration")),
-            "bb_charged": _to_int(body_battery.get("chargedValue")),
-            "bb_drained": _to_int(body_battery.get("drainedValue")),
-            "bb_highest": _to_int(stat_map.get("HIGHEST")),
-            "bb_lowest": _to_int(stat_map.get("LOWEST")),
-            "bb_start_of_day": _to_int(stat_map.get("STARTOFDAY")),
-            "bb_end_of_day": _to_int(stat_map.get("ENDOFDAY")),
-            "bb_sleep_start": _to_int(stat_map.get("SLEEPSTART")),
-            "bb_sleep_end": _to_int(stat_map.get("SLEEPEND")),
-            "bb_during_sleep": _to_int(stat_map.get("DURINGSLEEP")),
-        }
-    return [by_date[d] for d in sorted(by_date)]
-
-
-def _transform_hrv(raw: list[dict]) -> list[dict]:
-    rows = []
-    for rec in raw:
-        if not isinstance(rec, dict):
-            continue
-        cal = _parse_date(rec.get("calendarDate"))
-        if cal is None:
-            continue
-
-        # get_hrv_data may return a nested "hrvSummary" object.
-        summary = rec.get("hrvSummary") or rec
-        if not isinstance(summary, dict):
-            continue
-
-        metrics = {
-            m["type"]: m for m in summary.get("metrics", []) if isinstance(m, dict)
-        }
-        hrv = metrics.get("HRV", {})
-        if not hrv and summary.get("value"):
-            hrv = summary
-
-        rmssd = hrv.get("value") or summary.get("rmssd")
-        if rmssd is None:
-            continue
-
-        rows.append(
-            {
-                "calendar_date": cal,
-                "source": "daily",
-                "snapshot_time": "",
-                "rmssd": rmssd,
-                "sdrr": summary.get("sdrr"),
-                "hrv_status": hrv.get("status") or summary.get("status"),
-                "hrv_pct": hrv.get("percentage") or summary.get("percentage"),
-                "baseline_lo": hrv.get("baselineLowerLimit")
-                or summary.get("baselineLowerLimit"),
-                "baseline_hi": hrv.get("baselineUpperLimit")
-                or summary.get("baselineUpperLimit"),
-            }
-        )
-    return rows
-
-
-def _transform_training_readiness(raw: list[dict]) -> list[dict]:
-    by_date: dict[date, dict] = {}
-    for rec in raw:
-        if not isinstance(rec, dict):
-            continue
-        cal = _parse_date(rec.get("calendarDate"))
-        if cal is None:
-            continue
-        by_date[cal] = {
-            "calendar_date": cal,
-            "score": _to_int(rec.get("score")),
-            "level": rec.get("level"),
-            "feedback_short": rec.get("feedbackShort"),
-        }
-    return [by_date[d] for d in sorted(by_date)]
-
-
-def _transform_training_load(raw: list[dict]) -> list[dict]:
-    by_date: dict[date, dict] = {}
-    for rec in raw:
-        if not isinstance(rec, dict):
-            continue
-        cal = _parse_date(rec.get("calendarDate"))
-        if cal is None:
-            continue
-        by_date[cal] = {
-            "calendar_date": cal,
-            "acute_load": _to_int(rec.get("dailyTrainingLoadAcute")),
-            "chronic_load": _to_int(rec.get("dailyTrainingLoadChronic")),
-            "acwr": rec.get("dailyAcuteChronicWorkloadRatio"),
-            "acwr_status": rec.get("acwrStatus"),
-        }
-    return [by_date[d] for d in sorted(by_date)]
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SyncDataset:
+    """One best-effort dataset pulled from Garmin and upserted locally."""
+
+    name: str  # SyncReport field and skipped_datasets label
+    fetch_method: str  # GarminClient method taking (start_date, end_date)
+    model: type[Any]
+    key_fields: tuple[str, ...]
+    transform: Callable[[list[dict]], list[dict]]
+
+
+_SYNC_DATASETS: tuple[_SyncDataset, ...] = (
+    _SyncDataset(
+        "activities",
+        "get_activities",
+        Activity,
+        ("activity_id",),
+        _transform_activities,
+    ),
+    _SyncDataset(
+        "daily_wellness",
+        "get_daily_wellness",
+        DailyWellness,
+        ("calendar_date",),
+        _transform_daily_wellness,
+    ),
+    _SyncDataset(
+        "hrv",
+        "get_hrv",
+        Hrv,
+        ("calendar_date", "source", "snapshot_time"),
+        _transform_hrv,
+    ),
+    _SyncDataset(
+        "training_readiness",
+        "get_training_readiness",
+        TrainingReadiness,
+        ("calendar_date",),
+        _transform_training_readiness,
+    ),
+    _SyncDataset(
+        "training_load",
+        "get_training_load",
+        TrainingLoad,
+        ("calendar_date",),
+        _transform_training_load,
+    ),
+)
+
+
+def _log_sync_failure(
+    dataset_name: str, start_date: date, end_date: date, exc: Exception
+) -> None:
+    """Structured warning for a skipped dataset (no credentials logged)."""
+    logger.warning(
+        "Sync %s failed: %s",
+        dataset_name,
+        exc,
+        extra={
+            "dataset": dataset_name,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "error": repr(exc),
+        },
+    )
+
+
+def _sync_dataset(
+    db: Session,
+    client: GarminClient,
+    dataset: _SyncDataset,
+    start_date: date,
+    end_date: date,
+) -> int | None:
+    """Pull and upsert one dataset; return row count or None when it failed."""
+    try:
+        raw = getattr(client, dataset.fetch_method)(start_date, end_date)
+        return _upsert_many(
+            db, dataset.model, dataset.key_fields, dataset.transform(raw)
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort dataset
+        _log_sync_failure(dataset.name, start_date, end_date, exc)
+        return None
 
 
 def sync_garmin_data(
@@ -278,76 +183,25 @@ def sync_garmin_data(
     ``as_of`` defaults to the latest date already present in the local data, or
     ``date.today()`` if the database is empty. This keeps re-syncs idempotent:
     the same wall-clock day is not pulled twice with different ranges.
+
+    Example:
+        ``sync_garmin_data(db, client, days_back=7).skipped_datasets``
     """
     if as_of is None:
         as_of = latest_local_date(db) or date.today()
     start_date = as_of - timedelta(days=days_back)
-    end_date = as_of
-
-    report = SyncReport()
 
     # Short-circuit if the client is reporting an MFA challenge.
     if getattr(client, "_pending_mfa", False):
         return SyncReport(needs_mfa=True)
 
-    # --- activities ---
-    try:
-        raw_activities = client.get_activities(start_date, end_date)
-        report.activities = _upsert_many(
-            db, Activity, ("activity_id",), _transform_activities(raw_activities)
-        )
-    except Exception as exc:  # noqa: BLE001 — best-effort dataset
-        logger.warning("Sync activities failed: %s", exc)
-        report.skipped_datasets.append("activities")
-
-    # --- daily wellness ---
-    try:
-        raw_wellness = client.get_daily_wellness(start_date, end_date)
-        report.daily_wellness = _upsert_many(
-            db,
-            DailyWellness,
-            ("calendar_date",),
-            _transform_daily_wellness(raw_wellness),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Sync daily_wellness failed: %s", exc)
-        report.skipped_datasets.append("daily_wellness")
-
-    # --- HRV ---
-    try:
-        raw_hrv = client.get_hrv(start_date, end_date)
-        report.hrv = _upsert_many(
-            db,
-            Hrv,
-            ("calendar_date", "source", "snapshot_time"),
-            _transform_hrv(raw_hrv),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Sync hrv failed: %s", exc)
-        report.skipped_datasets.append("hrv")
-
-    # --- training readiness ---
-    try:
-        raw_readiness = client.get_training_readiness(start_date, end_date)
-        report.training_readiness = _upsert_many(
-            db,
-            TrainingReadiness,
-            ("calendar_date",),
-            _transform_training_readiness(raw_readiness),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Sync training_readiness failed: %s", exc)
-        report.skipped_datasets.append("training_readiness")
-
-    # --- training load ---
-    try:
-        raw_load = client.get_training_load(start_date, end_date)
-        report.training_load = _upsert_many(
-            db, TrainingLoad, ("calendar_date",), _transform_training_load(raw_load)
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Sync training_load failed: %s", exc)
-        report.skipped_datasets.append("training_load")
+    report = SyncReport()
+    for dataset in _SYNC_DATASETS:
+        count = _sync_dataset(db, client, dataset, start_date, as_of)
+        if count is None:
+            report.skipped_datasets.append(dataset.name)
+            continue
+        setattr(report, dataset.name, count)
 
     db.flush()
     report.newest_date = latest_local_date(db)

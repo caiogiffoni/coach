@@ -86,9 +86,7 @@ def extract_zip_safely(
         for info in zf.infolist():
             safe_path = _safe_member_path(info, target)
             if safe_path is None:
-                raise ValueError(
-                    f"Zip contains unsafe path: {info.filename!r}"
-                )
+                raise ValueError(f"Zip contains unsafe path: {info.filename!r}")
 
             uncompressed = info.file_size
             compressed = info.compress_size or uncompressed or 1

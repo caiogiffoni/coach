@@ -15,6 +15,7 @@ The natural key is ``activity_id``, derived from the session start time as
 """
 
 import io
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Activity
+
+logger = logging.getLogger(__name__)
 
 FitParser = Callable[[Path], dict]
 
@@ -57,43 +60,43 @@ def _ms_to_dt(ts: datetime | int | float | None) -> datetime | None:
     return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).replace(tzinfo=None)
 
 
-def _parse_session(session: Any) -> dict:
-    """Turn a fitparse session record into an Activity kwargs dict."""
+def _activity_id_from_start(start_raw: Any) -> int | None:
+    """Stable numeric ID from the session start time (UTC epoch seconds)."""
+    if isinstance(start_raw, datetime):
+        return int(start_raw.timestamp())
+    if isinstance(start_raw, (int, float)):
+        return int(start_raw / 1000)
+    return None
+
+
+def _session_identity_fields(session: Any) -> dict:
+    """ID, name, sport and start-time columns of a FIT session."""
     sport = _normalize_sport(_get_field(session, "sport"))
     sub_sport = _normalize_sport(_get_field(session, "sub_sport"))
     start_raw = _get_field(session, "start_time")
     start_time = _ms_to_dt(start_raw)
-
-    duration_s = _get_field(session, "total_elapsed_time", "total_timer_time")
-    distance_m = _get_field(session, "total_distance")
-    elevation_m = _get_field(session, "total_ascent")
-    avg_hr = _get_field(session, "avg_heart_rate")
-    max_hr = _get_field(session, "max_heart_rate")
-    min_hr = _get_field(session, "min_heart_rate")
-    calories = _get_field(session, "total_calories")
-
-    # Stable numeric ID from the session start time (UTC epoch seconds).
-    if isinstance(start_raw, datetime):
-        activity_id = int(start_raw.timestamp())
-    elif isinstance(start_raw, (int, float)):
-        activity_id = int(start_raw / 1000)
-    else:
-        activity_id = None
-
     return {
-        "activity_id": activity_id,
+        "activity_id": _activity_id_from_start(start_raw),
         "name": _get_field(session, "name"),
         "activity_type": sub_sport or sport,
         "sport_type": sport,
         "start_time_gmt": start_time,
         "start_time_local": start_time,
+    }
+
+
+def _session_metric_fields(session: Any) -> dict:
+    """Duration, distance, HR, calorie and training-effect columns."""
+    duration_s = _get_field(session, "total_elapsed_time", "total_timer_time")
+    distance_m = _get_field(session, "total_distance")
+    return {
         "duration_min": duration_s / 60 if duration_s is not None else None,
         "distance_km": distance_m / 1_000 if distance_m is not None else None,
-        "elevation_gain_m": elevation_m,
-        "avg_hr": avg_hr,
-        "max_hr": max_hr,
-        "min_hr": min_hr,
-        "calories": calories,
+        "elevation_gain_m": _get_field(session, "total_ascent"),
+        "avg_hr": _get_field(session, "avg_heart_rate"),
+        "max_hr": _get_field(session, "max_heart_rate"),
+        "min_hr": _get_field(session, "min_heart_rate"),
+        "calories": _get_field(session, "total_calories"),
         "vo2max_value": None,
         "aerobic_training_effect": _get_field(session, "total_training_effect"),
         "anaerobic_training_effect": _get_field(
@@ -105,28 +108,54 @@ def _parse_session(session: Any) -> dict:
     }
 
 
+def _parse_session(session: Any) -> dict:
+    """Turn a fitparse session record into an Activity kwargs dict.
+
+    Example:
+        ``_parse_session(record)["distance_km"]`` for a 5000 m session is 5.0.
+    """
+    return {
+        **_session_identity_fields(session),
+        **_session_metric_fields(session),
+    }
+
+
+def _log_invalid_fit(stage: str, exc: Exception) -> None:
+    logger.warning(
+        "Invalid FIT file during %s: %s",
+        stage,
+        exc,
+        extra={"dataset": "fit", "stage": stage, "error": repr(exc)},
+    )
+
+
+def _open_fit(path_or_bytes: Path | bytes) -> FitFile:
+    try:
+        if isinstance(path_or_bytes, bytes):
+            return FitFile(io.BytesIO(path_or_bytes))
+        return FitFile(str(path_or_bytes))
+    except Exception as exc:  # noqa: BLE001 — fitparse raises varied errors
+        _log_invalid_fit("open", exc)
+        raise ValueError(f"Invalid FIT file: {exc}") from exc
+
+
+def _first_session(fit: FitFile) -> Any:
+    try:
+        for record in fit.get_messages("session"):
+            return record
+    except Exception as exc:  # noqa: BLE001 — fitparse raises varied errors
+        _log_invalid_fit("read_session", exc)
+        raise ValueError(f"Invalid FIT file: {exc}") from exc
+    return None
+
+
 def parse_fit_file(path_or_bytes: Path | bytes) -> dict:
     """Parse a FIT file and return an Activity kwargs dict.
 
     Raises ValueError when the file is not a valid FIT file, no session record
     is found, or the start time is missing.
     """
-    try:
-        if isinstance(path_or_bytes, bytes):
-            fit = FitFile(io.BytesIO(path_or_bytes))
-        else:
-            fit = FitFile(str(path_or_bytes))
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"Invalid FIT file: {exc}") from exc
-
-    session = None
-    try:
-        for record in fit.get_messages("session"):
-            session = record
-            break
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"Invalid FIT file: {exc}") from exc
-
+    session = _first_session(_open_fit(path_or_bytes))
     if session is None:
         raise ValueError("FIT file has no session record")
 
