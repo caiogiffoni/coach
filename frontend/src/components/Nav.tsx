@@ -22,6 +22,9 @@ export function Nav() {
           <NavLink to="/week" className="nav-link">
             Week
           </NavLink>
+          <NavLink to="/workouts" className="nav-link">
+            Workouts
+          </NavLink>
           <NavLink to="/profile" className="nav-link">
             Profile
           </NavLink>

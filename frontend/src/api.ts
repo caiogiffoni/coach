@@ -9,6 +9,10 @@ import type {
   GenerateWeekRequest,
   ImportReport,
   IngestionStatus,
+  LibraryWorkout,
+  LibraryWorkoutInput,
+  LibraryWorkoutPush,
+  LibraryWorkoutSummary,
   LoginResult,
   Profile,
   ProfileUpdate,
@@ -62,37 +66,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   })
-
-  let errorData: unknown = null
-  if (!res.ok) {
-    errorData = await res.json().catch(() => null)
-  }
-
-  if (res.status === 401 && getToken()) {
-    // Garmin MFA challenges are returned as 401 with needs_mfa: do not bounce.
-    const data = errorData as { needs_mfa?: boolean } | null
-    if (data?.needs_mfa) {
-      throw new ApiError(401, JSON.stringify(data))
-    }
-    // Expired/invalid session: drop the token and bounce to login.
-    clearToken()
-    window.location.assign('/login')
-    throw new ApiError(401, 'Session expired')
-  }
-
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`
-    const data = errorData as { detail?: string | Array<{ msg?: string }> } | null
-    if (typeof data?.detail === 'string') {
-      message = data.detail
-    } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
-      // FastAPI 422 validation errors: [{loc, msg, ...}]
-      message = data.detail.map((e) => e.msg ?? '').join('; ')
-    }
-    throw new ApiError(res.status, message)
-  }
-
-  return (await res.json()) as T
+  return handleResponse<T>(res)
 }
 
 // --- Auth -------------------------------------------------------------------
@@ -148,6 +122,34 @@ export const ingestion = {
     request<SyncReport>('/ingestion/sync', { method: 'POST', body: { days } }),
 }
 
+/** Garmin auth failures come back as 401 but must not end the app session. */
+function garminAuthFailureMessage(errorData: unknown): string | null {
+  const data = errorData as { needs_mfa?: boolean; detail?: unknown } | null
+  if (data?.needs_mfa) return JSON.stringify(data)
+  // backend/app/garmin/push.py _require_login raises 401 "MFA required: …" /
+  // "Garmin login failed: …" for both the week and the library-workout push.
+  const detail = data?.detail
+  if (typeof detail === 'string' && /^(MFA required|Garmin login failed)/.test(detail)) return detail
+  return null
+}
+
+function errorDetailMessage(status: number, errorData: unknown): string {
+  const data = errorData as {
+    detail?: string | Array<{ loc?: Array<string | number>; msg?: string }>
+  } | null
+  if (typeof data?.detail === 'string') return data.detail
+  if (Array.isArray(data?.detail) && data.detail.length > 0) {
+    // FastAPI 422 validation errors: [{loc, msg, ...}]; drop the "body" root.
+    return data.detail
+      .map((e) => {
+        const where = (e.loc ?? []).filter((part) => part !== 'body').join('.')
+        return where ? `${where}: ${e.msg ?? ''}` : (e.msg ?? '')
+      })
+      .join('; ')
+  }
+  return `Request failed (${status})`
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   let errorData: unknown = null
   if (!res.ok) {
@@ -155,26 +157,17 @@ async function handleResponse<T>(res: Response): Promise<T> {
   }
 
   if (res.status === 401 && getToken()) {
-    const data = errorData as { needs_mfa?: boolean } | null
-    if (data?.needs_mfa) {
-      throw new ApiError(401, JSON.stringify(data))
-    }
+    const garminMessage = garminAuthFailureMessage(errorData)
+    if (garminMessage !== null) throw new ApiError(401, garminMessage)
+    // Expired/invalid session: drop the token and bounce to login.
     clearToken()
     window.location.assign('/login')
     throw new ApiError(401, 'Session expired')
   }
 
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`
-    const data = errorData as { detail?: string | Array<{ msg?: string }> } | null
-    if (typeof data?.detail === 'string') {
-      message = data.detail
-    } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
-      message = data.detail.map((e) => e.msg ?? '').join('; ')
-    }
-    throw new ApiError(res.status, message)
-  }
-
+  if (!res.ok) throw new ApiError(res.status, errorDetailMessage(res.status, errorData))
+  // 204 No Content (e.g. DELETE) has no JSON body.
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
@@ -205,4 +198,20 @@ export const garmin = {
     }),
   push: (week_start: string) =>
     request<PushReport>(`/garmin/push?week_start=${week_start}`, { method: 'POST' }),
+}
+
+// --- Workout library ------------------------------------------------------------
+
+export const workoutLibrary = {
+  list: () => request<LibraryWorkoutSummary[]>('/workouts'),
+  get: (id: number) => request<LibraryWorkout>(`/workouts/${id}`),
+  create: (body: LibraryWorkoutInput) =>
+    request<LibraryWorkout>('/workouts', { method: 'POST', body }),
+  update: (id: number, body: LibraryWorkoutInput) =>
+    request<LibraryWorkout>(`/workouts/${id}`, { method: 'PUT', body }),
+  remove: (id: number) => request<void>(`/workouts/${id}`, { method: 'DELETE' }),
+  duplicate: (id: number) =>
+    request<LibraryWorkout>(`/workouts/${id}/duplicate`, { method: 'POST' }),
+  push: (id: number, date: string) =>
+    request<LibraryWorkoutPush>(`/workouts/${id}/push`, { method: 'POST', body: { date } }),
 }

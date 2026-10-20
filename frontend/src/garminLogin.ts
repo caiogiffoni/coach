@@ -1,4 +1,5 @@
 import { garmin } from './api'
+import type { GarminStatus } from './types'
 
 /**
  * Submit a Garmin MFA code; reports failure through `onFailure`.
@@ -19,4 +20,13 @@ export async function verifyGarminMfa(
     return false
   }
   return true
+}
+
+/**
+ * Why a Garmin push is unavailable, or null when configured (or still unknown).
+ *
+ * Example: `disabled={garminPushDisabledReason(garminStatus) !== null}`
+ */
+export function garminPushDisabledReason(garminStatus: GarminStatus | null): string | null {
+  return garminStatus && !garminStatus.configured ? 'Garmin credentials not configured' : null
 }

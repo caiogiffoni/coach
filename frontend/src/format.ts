@@ -119,3 +119,33 @@ export function formatWeekRange(isoStart: string): string {
 
   return `${start.toLocaleDateString('en', optsStart)} – ${end.toLocaleDateString('en', optsEnd)}${yearSuffix}`
 }
+
+/** 2700 → "45:00", 4523 → "1:15:23". Returns '' for null/undefined. */
+export function formatDuration(sec: number | null | undefined): string {
+  if (sec == null) return ''
+  // Round first so 299.6 s renders "5:00", not "4:60".
+  const whole = Math.round(sec)
+  return whole >= 3600 ? secToHms(whole) : secToMinSec(whole)
+}
+
+/** 5200 → "5.20 km". Returns '' for null/undefined. */
+export function formatDistanceM(meters: number | null | undefined): string {
+  if (meters == null) return ''
+  return `${(meters / 1000).toFixed(2)} km`
+}
+
+/** ISO timestamp → local "11 May 2026, 14:05". */
+export function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** Tomorrow as a local "YYYY-MM-DD". */
+export function tomorrowISO(): string {
+  return toISODate(addDays(new Date(), 1))
+}
