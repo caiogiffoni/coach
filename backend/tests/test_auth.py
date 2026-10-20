@@ -1,9 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth.rate_limit import LoginRateLimiter, get_login_rate_limiter
 from app.db import Base, get_db
 from app.main import app
 
@@ -25,7 +27,10 @@ def client():
         finally:
             db.close()
 
+    # Fresh limiter per test so failed logins never leak between tests.
+    limiter = LoginRateLimiter(max_failures=5, window_seconds=15 * 60)
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_login_rate_limiter] = lambda: limiter
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -107,3 +112,44 @@ def test_me_with_token(client):
 def test_me_with_garbage_token(client):
     resp = client.get("/api/auth/me", headers={"Authorization": "Bearer garbage"})
     assert resp.status_code == 401
+
+
+def _fail_login(client: TestClient) -> Response:
+    return client.post(
+        "/api/auth/login", json={"email": "caio@example.com", "password": "wrongpass"}
+    )
+
+
+def test_login_locked_out_after_max_failures(client):
+    for _ in range(5):
+        assert _fail_login(client).status_code == 401
+    resp = _fail_login(client)
+    assert resp.status_code == 429
+    assert 0 < int(resp.headers["Retry-After"]) <= 15 * 60
+
+
+def test_lockout_blocks_even_correct_password(client):
+    client.post(
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
+    )
+    for _ in range(5):
+        _fail_login(client)
+    resp = client.post(
+        "/api/auth/login", json={"email": "caio@example.com", "password": "secret123"}
+    )
+    assert resp.status_code == 429
+
+
+def test_successful_login_resets_failure_count(client):
+    client.post(
+        "/api/auth/register",
+        json={"email": "caio@example.com", "password": "secret123"},
+    )
+    for _ in range(4):
+        _fail_login(client)
+    client.post(
+        "/api/auth/login", json={"email": "caio@example.com", "password": "secret123"}
+    )
+    for _ in range(4):
+        assert _fail_login(client).status_code == 401
