@@ -11,7 +11,17 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .export_parsing import _parse_date, _sorted_by_date, activity_row
+from .export_metrics import _vo2max_row
+from .export_parsing import (
+    _iso_to_dt,
+    _ms_to_dt,
+    _parse_date,
+    _scale,
+    _sorted_by_date,
+    _sorted_by_date_sport,
+    activity_effort_fields,
+)
+from .export_wellness import sleep_stage_fields
 
 
 def _to_int(value: Any) -> int | None:
@@ -35,9 +45,32 @@ def _dated_records(raw: list[dict]) -> list[tuple[date, dict]]:
     return pairs
 
 
+def _api_activity_row(a: dict) -> dict:
+    """Live activity-search result → ``Activity`` kwargs.
+
+    Unlike the export, the search uses seconds, metres, "YYYY-MM-DD hh:mm:ss"
+    timestamps, ``averageHR``-style keys and a nested ``activityType``.
+    """
+    return {
+        "activity_id": a["activityId"],
+        "name": a.get("activityName"),
+        "activity_type": _as_dict(a.get("activityType")).get("typeKey"),
+        "sport_type": None,  # search only has a numeric sportTypeId
+        "start_time_gmt": _iso_to_dt(a.get("startTimeGMT")),
+        "start_time_local": _iso_to_dt(a.get("startTimeLocal")),
+        "duration_min": _scale(a.get("duration"), 60),
+        "distance_km": _scale(a.get("distance"), 1000),
+        "elevation_gain_m": a.get("elevationGain"),
+        "avg_hr": a.get("averageHR"),
+        "max_hr": a.get("maxHR"),
+        "min_hr": a.get("minHR"),
+        **activity_effort_fields(a),
+    }
+
+
 def _transform_activities(raw: list[dict]) -> list[dict]:
     return [
-        activity_row(a)
+        _api_activity_row(a)
         for a in raw
         if isinstance(a, dict) and a.get("activityId") is not None
     ]
@@ -91,6 +124,36 @@ def _wellness_stress_fields(total: dict) -> dict[str, Any]:
     }
 
 
+def _flat_stress(rec: dict) -> dict:
+    """Stress totals from the flat ``usersummary/daily`` shape (live API)."""
+    return {
+        "averageStressLevel": rec.get("averageStressLevel"),
+        "maxStressLevel": rec.get("maxStressLevel"),
+        "stressDuration": rec.get("stressDuration"),
+        "restDuration": rec.get("restStressDuration"),
+    }
+
+
+def _flat_body_battery_fields(rec: dict) -> dict[str, Any]:
+    """Body battery from the flat ``usersummary/daily`` shape (live API)."""
+    return {
+        "bb_charged": _to_int(rec.get("bodyBatteryChargedValue")),
+        "bb_drained": _to_int(rec.get("bodyBatteryDrainedValue")),
+        "bb_highest": _to_int(rec.get("bodyBatteryHighestValue")),
+        "bb_lowest": _to_int(rec.get("bodyBatteryLowestValue")),
+        "bb_sleep_end": _to_int(rec.get("bodyBatteryAtWakeTime")),
+        "bb_during_sleep": _to_int(rec.get("bodyBatteryDuringSleep")),
+    }
+
+
+def _body_battery_fields(rec: dict) -> dict[str, Any]:
+    """Nested ``bodyBattery`` stat list when present, else the flat summary keys."""
+    nested = _as_dict(rec.get("bodyBattery"))
+    if nested.get("bodyBatteryStatList"):
+        return _wellness_body_battery_fields(nested)
+    return _flat_body_battery_fields(rec)
+
+
 def _wellness_body_battery_fields(body_battery: dict) -> dict[str, Any]:
     stat_map = _body_battery_stats(body_battery)
     return {
@@ -112,10 +175,58 @@ def _transform_daily_wellness(raw: list[dict]) -> list[dict]:
         by_date[cal] = {
             "calendar_date": cal,
             **_wellness_activity_fields(rec),
-            **_wellness_stress_fields(_total_stress(rec)),
-            **_wellness_body_battery_fields(_as_dict(rec.get("bodyBattery"))),
+            **_wellness_stress_fields(_total_stress(rec) or _flat_stress(rec)),
+            **_body_battery_fields(rec),
         }
     return _sorted_by_date(by_date)
+
+
+def _sleep_scores(rec: dict) -> dict[str, Any]:
+    """Live API nests the score as ``sleepScores.overall.value``."""
+    overall = _as_dict(_as_dict(rec.get("sleepScores")).get("overall"))
+    return {"overall_score": _to_int(overall.get("value"))}
+
+
+def _transform_sleep(raw: list[dict]) -> list[dict]:
+    """Live sleep summaries (epoch-ms timestamps) → ``Sleep`` kwargs."""
+    by_date: dict[date, dict] = {}
+    for cal, rec in _dated_records(raw):
+        by_date[cal] = {
+            "calendar_date": cal,
+            "sleep_start_gmt": _ms_to_dt(rec.get("sleepStartTimestampGMT")),
+            "sleep_end_gmt": _ms_to_dt(rec.get("sleepEndTimestampGMT")),
+            **sleep_stage_fields(rec),
+            "average_respiration": rec.get("averageRespirationValue"),
+            **_sleep_scores(rec),
+        }
+    return _sorted_by_date(by_date)
+
+
+def _vo2max_entries(rec: dict) -> list[dict]:
+    """Each ``maxmet/daily`` record holds a ``generic`` and a ``cycling`` entry."""
+    entries = [_as_dict(rec.get(key)) for key in ("generic", "cycling")]
+    # Per-date reads (password client) put calendarDate on the outer record.
+    return [
+        {
+            "calendarDate": rec.get("calendarDate"),
+            **e,
+            "vo2MaxValue": e.get("vo2MaxPreciseValue") or e.get("vo2MaxValue"),
+        }
+        for e in entries
+        if e
+    ]
+
+
+def _transform_vo2max(raw: list[dict]) -> list[dict]:
+    """Live ``maxmet/daily`` records → ``Vo2Max`` kwargs, one per (date, sport)."""
+    rows = [
+        _vo2max_row(entry, "metrics")
+        for rec in raw
+        if isinstance(rec, dict)
+        for entry in _vo2max_entries(rec)
+    ]
+    by_key = {(r["calendar_date"], r["sport"]): r for r in rows if r["calendar_date"]}
+    return _sorted_by_date_sport(by_key)
 
 
 def _hrv_metric(summary: dict) -> dict:
@@ -127,11 +238,34 @@ def _hrv_metric(summary: dict) -> dict:
     return hrv
 
 
+def _hrv_status_row(cal: date, summary: dict) -> dict:
+    """Row from the live ``/hrv-service`` summary: nightly avg + balanced band."""
+    baseline = _as_dict(summary.get("baseline"))
+    return {
+        "calendar_date": cal,
+        "source": "daily",
+        "snapshot_time": "",
+        "rmssd": summary["lastNightAvg"],
+        "sdrr": None,
+        "hrv_status": summary.get("status"),
+        "hrv_pct": None,
+        "baseline_lo": baseline.get("balancedLow"),
+        "baseline_hi": baseline.get("balancedUpper"),
+    }
+
+
 def _hrv_row(cal: date, rec: dict) -> dict | None:
     # get_hrv_data may return a nested "hrvSummary" object.
     summary = rec.get("hrvSummary") or rec
     if not isinstance(summary, dict):
         return None
+    if summary.get("lastNightAvg") is not None:
+        return _hrv_status_row(cal, summary)
+    return _hrv_metric_row(cal, summary)
+
+
+def _hrv_metric_row(cal: date, summary: dict) -> dict | None:
+    """Row from the export-style ``metrics[HRV]`` / flat ``rmssd`` shape."""
     hrv = _hrv_metric(summary)
     rmssd = hrv.get("value") or summary.get("rmssd")
     if rmssd is None:

@@ -124,22 +124,33 @@ def _sleep_score_fields(scores: dict) -> dict[str, Any]:
     }
 
 
-def _sleep_row(cal: date, record: dict) -> dict:
+def sleep_stage_fields(record: dict) -> dict[str, Any]:
+    """Stage durations, stress and awakenings — same keys in export and live API.
+
+    Example:
+        ``sleep_stage_fields({"deepSleepSeconds": 3600})["total_sleep_s"]  # 3600``
+    """
     deep = record.get("deepSleepSeconds") or 0
     light = record.get("lightSleepSeconds") or 0
     rem = record.get("remSleepSeconds") or 0
     return {
-        "calendar_date": cal,
-        "sleep_start_gmt": _iso_to_dt(record.get("sleepStartTimestampGMT")),
-        "sleep_end_gmt": _iso_to_dt(record.get("sleepEndTimestampGMT")),
         "deep_sleep_s": record.get("deepSleepSeconds"),
         "light_sleep_s": record.get("lightSleepSeconds"),
         "rem_sleep_s": record.get("remSleepSeconds"),
         "awake_sleep_s": record.get("awakeSleepSeconds"),
         "total_sleep_s": deep + light + rem,
-        "average_respiration": record.get("averageRespiration"),
         "avg_sleep_stress": record.get("avgSleepStress"),
         "awake_count": record.get("awakeCount"),
+    }
+
+
+def _sleep_row(cal: date, record: dict) -> dict:
+    return {
+        "calendar_date": cal,
+        "sleep_start_gmt": _iso_to_dt(record.get("sleepStartTimestampGMT")),
+        "sleep_end_gmt": _iso_to_dt(record.get("sleepEndTimestampGMT")),
+        **sleep_stage_fields(record),
+        "average_respiration": record.get("averageRespiration"),
         **_sleep_score_fields(record.get("sleepScores") or {}),
     }
 

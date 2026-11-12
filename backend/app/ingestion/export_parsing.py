@@ -99,10 +99,10 @@ def _sorted_by_date_sport(by_key: dict[tuple, dict]) -> list[dict]:
 
 
 def activity_row(a: dict) -> dict:
-    """Map a Garmin summarized-activity dict to ``Activity`` kwargs.
+    """Map a GDPR-export summarized-activity dict to ``Activity`` kwargs.
 
-    Used by both the GDPR export loader and the Connect API pull, whose
-    activity payloads share the same field names and units.
+    Export units: ms durations, cm distances, epoch-ms timestamps. The live
+    activity search differs; see ``api_transform._api_activity_row``.
 
     Example:
         ``activity_row({"activityId": 1, "distance": 500_000})["distance_km"]``
@@ -121,6 +121,17 @@ def activity_row(a: dict) -> dict:
         "avg_hr": a.get("avgHr"),
         "max_hr": a.get("maxHr"),
         "min_hr": a.get("minHr"),
+        **activity_effort_fields(a),
+    }
+
+
+def activity_effort_fields(a: dict) -> dict:
+    """Fields named alike in the GDPR export and the live activity search.
+
+    Example:
+        ``activity_effort_fields({"activityTrainingLoad": 80})["training_load"]``
+    """
+    return {
         "calories": a.get("calories"),
         "vo2max_value": a.get("vO2MaxValue"),
         "aerobic_training_effect": a.get("aerobicTrainingEffect"),
