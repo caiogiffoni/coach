@@ -1,7 +1,7 @@
 """
 Auto-pull recent data from Garmin Connect into the normalized SQLite store.
 
-Uses the dependency-injected ``GarminClient`` protocol so tests can substitute
+Uses the dependency-injected ``GarminDataSource`` protocol so tests can substitute
 a fake client. Each dataset is pulled for a configurable look-back window,
 transformed (``api_transform.py``) into the same kwargs used by
 ``export_import.py``, and upserted on
@@ -22,21 +22,25 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..garmin.client import GarminClient
+from ..garmin.client import GarminDataSource
 from .api_transform import (
     _transform_activities,
     _transform_daily_wellness,
     _transform_hrv,
+    _transform_sleep,
     _transform_training_load,
     _transform_training_readiness,
+    _transform_vo2max,
 )
 from .export_parsing import _upsert_many
 from .models import (
     Activity,
     DailyWellness,
     Hrv,
+    Sleep,
     TrainingLoad,
     TrainingReadiness,
+    Vo2Max,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +54,8 @@ class SyncReport(BaseModel):
     activities: int = 0
     daily_wellness: int = 0
     hrv: int = 0
+    sleep: int = 0
+    vo2max: int = 0
     training_readiness: int = 0
     training_load: int = 0
     skipped_datasets: list[str] = []
@@ -68,6 +74,7 @@ def latest_local_date(db: Session) -> date | None:
     for model, column in (
         (DailyWellness, DailyWellness.calendar_date),
         (Hrv, Hrv.calendar_date),
+        (Sleep, Sleep.calendar_date),
         (TrainingLoad, TrainingLoad.calendar_date),
         (TrainingReadiness, TrainingReadiness.calendar_date),
     ):
@@ -92,7 +99,7 @@ class _SyncDataset:
     """One best-effort dataset pulled from Garmin and upserted locally."""
 
     name: str  # SyncReport field and skipped_datasets label
-    fetch_method: str  # GarminClient method taking (start_date, end_date)
+    fetch_method: str  # GarminDataSource method taking (start_date, end_date)
     model: type[Any]
     key_fields: tuple[str, ...]
     transform: Callable[[list[dict]], list[dict]]
@@ -119,6 +126,14 @@ _SYNC_DATASETS: tuple[_SyncDataset, ...] = (
         Hrv,
         ("calendar_date", "source", "snapshot_time"),
         _transform_hrv,
+    ),
+    _SyncDataset("sleep", "get_sleep", Sleep, ("calendar_date",), _transform_sleep),
+    _SyncDataset(
+        "vo2max",
+        "get_vo2max",
+        Vo2Max,
+        ("calendar_date", "sport"),
+        _transform_vo2max,
     ),
     _SyncDataset(
         "training_readiness",
@@ -156,7 +171,7 @@ def _log_sync_failure(
 
 def _sync_dataset(
     db: Session,
-    client: GarminClient,
+    client: GarminDataSource,
     dataset: _SyncDataset,
     start_date: date,
     end_date: date,
@@ -174,7 +189,7 @@ def _sync_dataset(
 
 def sync_garmin_data(
     db: Session,
-    client: GarminClient,
+    client: GarminDataSource,
     days_back: int = DEFAULT_DAYS_BACK,
     as_of: date | None = None,
 ) -> SyncReport:

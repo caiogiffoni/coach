@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from ..auth.security import get_current_user
 from ..config import settings
 from ..db import get_db
-from ..garmin.client import GarminClient, garmin_client_or_raise
+from ..garmin.client import GarminDataSource
+from ..garmin.data_source import garmin_data_source_or_raise
 from ..models import User
 from .api_pull import SyncReport, latest_local_date, sync_garmin_data
 from .export_import import ImportReport, import_export
@@ -209,7 +210,7 @@ def sync_garmin(
     body: SyncRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    client: GarminClient = Depends(garmin_client_or_raise),
+    client: GarminDataSource = Depends(garmin_data_source_or_raise),
 ) -> SyncReport | JSONResponse:
     """Pull recent data from Garmin Connect and upsert into the local store."""
     report = sync_garmin_data(db, client, days_back=body.days)

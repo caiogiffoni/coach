@@ -54,7 +54,7 @@ coach/
   - Default provider is Kimi K2 via the OpenAI-compatible endpoint (`openai` package with custom `base_url`).
   - Optional Claude provider (`anthropic` package) switched by `LLM_PROVIDER=claude`.
   - If no API key is configured, generation falls back to a deterministic rule-based planner.
-- **Garmin:** Unofficial `python-garminconnect` (v0.3.x) plus `curl_cffi` for TLS impersonation; token cache persisted on disk. No `garth`.
+- **Garmin:** Sync reads prefer the official Garmin Connect Personal API (`app/garmin/personal_api.py`, `GARMIN_API_KEY` → 24 h bearer JWT kept in memory; activities, wellness, HRV, sleep, VO2max — no workouts/calendar/readiness/training status). Training load is rebuilt from per-activity load (`app/ingestion/training_load_calc.py`). Push, and sync without a key, use the unofficial `python-garminconnect` (v0.3.x) plus `curl_cffi` for TLS impersonation; token cache persisted on disk. No `garth`.
 - **Data ingestion:** GDPR export zip/directory parser, FIT file parser (`fitparse`), and live Garmin Connect pull.
 
 ### Frontend
@@ -223,7 +223,8 @@ Backend tests run with `pythonpath = ["."]` (configured in `pyproject.toml`).
 - **Secrets live in `backend/.env`** and are never committed (`.gitignore` ignores `.env` and `backend/data/`).
 - **Critical env vars:**
   - `SECRET_KEY` — JWT signing key; must be ≥32 bytes or Settings validation fails at startup. The built-in dev default logs a warning.
-  - `GARMIN_EMAIL` / `GARMIN_PASSWORD` — Garmin credentials; optional until push/sync is used.
+  - `GARMIN_API_KEY` — Garmin Personal API key; preferred source for sync (read-only). Tests never use it (`no_real_garmin_personal_api` autouse fixture).
+  - `GARMIN_EMAIL` / `GARMIN_PASSWORD` — Garmin credentials; needed for push, and for sync when no API key is set.
   - `LLM_API_KEY` — LLM provider key; optional; missing key triggers deterministic fallback.
 - **Auth:** Registration closes once one user exists (`/api/auth/status`). Passwords are bcrypt-hashed.
 - **Garmin tokens** are cached on disk at `GARMIN_TOKEN_STORE` (`backend/data/garmin_tokens` locally); nothing Garmin-related is stored in the DB.
@@ -260,7 +261,7 @@ There is no production deployment pipeline in this repo. The Docker Compose file
 
 To schedule a one-off session, go to **Workouts**, build and save a workout, then push it to a date (also needs Garmin credentials).
 
-Push and auto-sync require real Garmin credentials; the daily guard and workout generator run entirely on local data.
+Sync uses `GARMIN_API_KEY` when set (else email/password); push always needs email/password. The daily guard and workout generator run entirely on local data.
 
 ---
 
@@ -335,5 +336,5 @@ Push and auto-sync require real Garmin credentials; the daily guard and workout 
 - **Run the checks:** After any code change run `make test` (or at least the relevant backend/frontend checks) before finishing.
 - **Database changes:** The schema is managed by Alembic (`backend/alembic/`, `backend/alembic.ini`). The app runs `alembic upgrade head` on startup (FastAPI lifespan → `app.db.upgrade_database`); pre-Alembic DBs made by `create_all` are stamped at the baseline revision first. After adding/changing models or columns, run `make migration msg="..."`, review the generated file, and commit it. New model modules must be added to `MODEL_MODULES` in `app/db.py` so autogenerate and tests see them. `tests/test_migrations.py` fails if models drift from the migrations. Tests still use in-memory `create_all`.
 - **LLM fallback:** It is fine to run without an LLM key — the generator falls back to deterministic workouts. This is also the test default.
-- **Garmin mocking:** The `GarminClient` protocol in `app/garmin/client.py` is the seam for fakes; tests in `tests/test_end_to_end.py` show the expected interface.
+- **Garmin mocking:** The `GarminDataSource` (reads) and `GarminClient` (reads + login/push) protocols in `app/garmin/client.py` are the seams for fakes; tests in `tests/test_end_to_end.py` show the expected interface. Sync picks its source in `app/garmin/data_source.py`; Personal API HTTP is behind `PersonalApiTransport` (`tests/test_personal_api.py`). Fake payloads should use the live API shapes (see `tests/test_api_transform_live_shapes.py`), not the GDPR-export shapes.
 - **`temp/` is a workspace:** It holds prototype scripts and the private Garmin export. It is gitignored; do not treat it as production code.

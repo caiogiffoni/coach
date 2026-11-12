@@ -68,6 +68,12 @@ class QuietGarminClient(GarminClient):
     def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
         return []
 
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
     def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
         return []
 

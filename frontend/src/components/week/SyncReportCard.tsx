@@ -19,6 +19,8 @@ export function SyncReportCard({ report }: { report: SyncReport }) {
           <SyncCount label="Activities" count={report.activities} />
           <SyncCount label="Wellness" count={report.daily_wellness} />
           <SyncCount label="HRV" count={report.hrv} />
+          <SyncCount label="Sleep" count={report.sleep} />
+          <SyncCount label="VO2max" count={report.vo2max} />
           <SyncCount label="Readiness" count={report.training_readiness} />
           <SyncCount label="Load" count={report.training_load} />
         </div>

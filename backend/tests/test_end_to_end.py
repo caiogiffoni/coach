@@ -5,7 +5,7 @@ register → import → seed → constraints → generate → guard → approve 
 All external clients are fakes injected via FastAPI dependency overrides.
 """
 
-from datetime import date, datetime
+from datetime import date
 
 import pytest
 from conftest import EXPORT
@@ -89,6 +89,12 @@ class FakePushGarminClient(GarminClient):
     def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
         return []
 
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
     def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
         return []
 
@@ -123,26 +129,22 @@ class FakeReadGarminClient(GarminClient):
 
     def get_activities(self, start_date: date, end_date: date) -> list[dict]:
         self.calls.append(("get_activities", start_date, end_date))
-        ts = int(datetime.combine(self.as_of, datetime.min.time()).timestamp() * 1000)
         return [
             {
                 "activityId": 9001,
-                "name": "E2E Morning Run",
-                "activityType": "running",
-                "sportType": "running",
-                "startTimeGmt": ts,
-                "startTimeLocal": ts,
-                "duration": 30 * 60 * 1000,
-                "distance": 500_000,
-                "elevationGain": 1000,
-                "avgHr": 150,
-                "maxHr": 170,
-                "minHr": 100,
-                "calories": 300,
-                "vO2MaxValue": 50,
+                "activityName": "E2E Morning Run",
+                "activityType": {"typeId": 1, "typeKey": "running"},
+                "startTimeGMT": f"{self.as_of} 09:00:00",
+                "startTimeLocal": f"{self.as_of} 06:00:00",
+                "duration": 30 * 60.0,
+                "distance": 5000.0,
+                "elevationGain": 10.0,
+                "averageHR": 150.0,
+                "maxHR": 170.0,
+                "calories": 300.0,
                 "aerobicTrainingEffect": 2.5,
                 "anaerobicTrainingEffect": 0.5,
-                "activityTrainingLoad": 120,
+                "activityTrainingLoad": 120.0,
                 "lapCount": 1,
                 "pr": False,
             }
@@ -169,6 +171,12 @@ class FakeReadGarminClient(GarminClient):
 
     def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
         self.calls.append(("get_hrv", start_date, end_date))
+        return []
+
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        return []
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
         return []
 
     def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:

@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     upload_max_zip_uncompressed_bytes: int = 500 * 1024 * 1024  # 500 MiB total
     upload_max_zip_uncompressed_ratio: int = 100  # guard against zip bombs
 
-    # Garmin Connect (unofficial API). Optional until push/sync is used.
+    # Garmin Connect Personal API key: preferred source for sync (read-only).
+    # Create one at https://connect.garmin.com/app/settings/personalApiToken
+    garmin_api_key: str = ""
+
+    # Garmin Connect (unofficial API). Needed for push; sync fallback.
     garmin_email: str = ""
     garmin_password: str = ""
     garmin_token_store: str = str(DATA_DIR / "garmin_tokens")

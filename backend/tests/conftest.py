@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
+from app.garmin.data_source import get_personal_api_client
 from app.ingestion.export_import import import_export
 from app.llm.client import get_llm_client
 from app.main import app
@@ -34,6 +35,19 @@ def no_real_llm():
     yield
     if set_by_fixture:
         app.dependency_overrides.pop(get_llm_client, None)
+
+
+@pytest.fixture(autouse=True)
+def no_real_garmin_personal_api():
+    """Never call Garmin's Personal API even if GARMIN_API_KEY is in backend/.env."""
+    if get_personal_api_client not in app.dependency_overrides:
+        app.dependency_overrides[get_personal_api_client] = lambda: None
+        set_by_fixture = True
+    else:
+        set_by_fixture = False
+    yield
+    if set_by_fixture:
+        app.dependency_overrides.pop(get_personal_api_client, None)
 
 
 def make_session():

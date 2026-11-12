@@ -36,8 +36,44 @@ class LoginResult:
     message: str = ""
 
 
-class GarminClient(Protocol):
-    """Dependency-injectable interface for Garmin Connect operations."""
+class GarminDataSource(Protocol):
+    """Read side of Garmin Connect used by sync; every method takes an inclusive range.
+
+    Implemented by the password-login ``RealGarminClient`` and by the
+    API-key ``PersonalApiGarminClient`` (``personal_api.py``).
+    """
+
+    def get_activities(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch activities between ``start_date`` and ``end_date`` (inclusive)."""
+        ...
+
+    def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch daily wellness summaries (steps, RHR, stress, body battery)."""
+        ...
+
+    def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch HRV data for ``start_date`` to ``end_date`` (inclusive)."""
+        ...
+
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch nightly sleep summaries (stages, timestamps, overall score)."""
+        ...
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch daily VO2max records (``{"generic": {...}, "cycling": {...}}``)."""
+        ...
+
+    def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch training readiness scores for the date range."""
+        ...
+
+    def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch training status / load data for the date range."""
+        ...
+
+
+class GarminClient(GarminDataSource, Protocol):
+    """Dependency-injectable interface for Garmin Connect login, reads and push."""
 
     def login(self, mfa_code: str | None = None) -> LoginResult:
         """Authenticate (or resume with ``mfa_code``)."""
@@ -64,26 +100,6 @@ class GarminClient(Protocol):
 
         Each dict must contain at least ``workoutId`` and ``name``.
         """
-        ...
-
-    def get_activities(self, start_date: date, end_date: date) -> list[dict]:
-        """Fetch activities between ``start_date`` and ``end_date`` (inclusive)."""
-        ...
-
-    def get_daily_wellness(self, start_date: date, end_date: date) -> list[dict]:
-        """Fetch daily wellness summaries (steps, RHR, stress, body battery)."""
-        ...
-
-    def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
-        """Fetch HRV data for ``start_date`` to ``end_date`` (inclusive)."""
-        ...
-
-    def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
-        """Fetch training readiness scores for the date range."""
-        ...
-
-    def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
-        """Fetch training status / load data for the date range."""
         ...
 
 
@@ -337,6 +353,14 @@ class RealGarminClient(GarminClient):
     def get_hrv(self, start_date: date, end_date: date) -> list[dict]:
         return self._call_per_date("get_hrv_data", start_date, end_date)
 
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        return self._call_per_date(
+            "get_sleep_data", start_date, end_date, key="dailySleepDTO"
+        )
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
+        return self._call_per_date("get_max_metrics", start_date, end_date)
+
     def get_training_readiness(self, start_date: date, end_date: date) -> list[dict]:
         """Try the daily readiness endpoint; fall back to the morning report."""
         client = self._ensure_logged_in()
@@ -445,14 +469,23 @@ def get_garmin_client() -> GarminClient | None:
     )
 
 
+def require_garmin_configured[T](source: T | None, detail: str) -> T:
+    """Return ``source`` or raise 403 with ``detail`` naming the env vars to set.
+
+    Example:
+        ``require_garmin_configured(client, "Set GARMIN_EMAIL ...")``
+    """
+    if source is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail)
+    return source
+
+
 def garmin_client_or_raise(
     client: GarminClient | None = Depends(get_garmin_client),
 ) -> GarminClient:
     """Raise a clear error when Garmin credentials are missing."""
-    if client is None:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Garmin credentials not configured. "
-            "Set GARMIN_EMAIL and GARMIN_PASSWORD in the backend .env file.",
-        )
-    return client
+    return require_garmin_configured(
+        client,
+        "Garmin credentials not configured. "
+        "Set GARMIN_EMAIL and GARMIN_PASSWORD in the backend .env file.",
+    )

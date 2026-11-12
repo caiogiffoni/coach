@@ -4,7 +4,7 @@ All tests use ``FakeGarminClient`` injected via FastAPI dependency override —
 no real Garmin API calls are made.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,13 +14,16 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.garmin.client import GarminClient, LoginResult, get_garmin_client
+from app.garmin.data_source import get_personal_api_client
 from app.ingestion.api_pull import sync_garmin_data
 from app.ingestion.models import (
     Activity,
     DailyWellness,
     Hrv,
+    Sleep,
     TrainingLoad,
     TrainingReadiness,
+    Vo2Max,
 )
 from app.main import app
 
@@ -125,26 +128,20 @@ class FakeGarminClient(GarminClient):
         return [
             {
                 "activityId": 1001,
-                "name": "Morning Run",
-                "activityType": "running",
-                "sportType": "running",
-                "startTimeGmt": int(
-                    datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000
-                ),
-                "startTimeLocal": int(
-                    datetime.combine(TODAY, datetime.min.time()).timestamp() * 1000
-                ),
-                "duration": 30 * 60 * 1000,
-                "distance": 500_000,  # 5 km in cm
-                "elevationGain": 1000,  # 10 m in cm
-                "avgHr": 150,
-                "maxHr": 170,
-                "minHr": 100,
-                "calories": 300,
-                "vO2MaxValue": 50,
+                "activityName": "Morning Run",
+                "activityType": {"typeId": 1, "typeKey": "running"},
+                "startTimeGMT": f"{TODAY} 09:00:00",
+                "startTimeLocal": f"{TODAY} 06:00:00",
+                "duration": 30 * 60.0,  # seconds
+                "distance": 5000.0,  # metres
+                "elevationGain": 10.0,  # metres
+                "averageHR": 150.0,
+                "maxHR": 170.0,
+                "calories": 300.0,
+                "vO2MaxValue": 50.0,
                 "aerobicTrainingEffect": 2.5,
                 "anaerobicTrainingEffect": 0.5,
-                "activityTrainingLoad": 120,
+                "activityTrainingLoad": 120.0,
                 "lapCount": 1,
                 "pr": False,
             }
@@ -206,6 +203,33 @@ class FakeGarminClient(GarminClient):
             }
         ]
 
+    def get_sleep(self, start_date: date, end_date: date) -> list[dict]:
+        self.calls.append(("get_sleep", start_date, end_date))
+        self._maybe_raise("sleep")
+        return [
+            {
+                "calendarDate": TODAY.isoformat(),
+                "deepSleepSeconds": 5400,
+                "lightSleepSeconds": 14400,
+                "remSleepSeconds": 7200,
+                "sleepScores": {"overall": {"value": 81}},
+            }
+        ]
+
+    def get_vo2max(self, start_date: date, end_date: date) -> list[dict]:
+        self.calls.append(("get_vo2max", start_date, end_date))
+        self._maybe_raise("vo2max")
+        return [
+            {
+                "generic": {
+                    "calendarDate": TODAY.isoformat(),
+                    "vo2MaxPreciseValue": 48.1,
+                    "sport": "RUNNING",
+                },
+                "cycling": None,
+            }
+        ]
+
     def get_training_load(self, start_date: date, end_date: date) -> list[dict]:
         self.calls.append(("get_training_load", start_date, end_date))
         self._maybe_raise("training_load")
@@ -237,8 +261,18 @@ def test_sync_garmin_data_upserts_all_datasets():
     assert report.hrv == 1
     assert report.training_readiness == 1
     assert report.training_load == 1
+    assert report.sleep == 1
+    assert report.vo2max == 1
     assert report.skipped_datasets == []
     assert report.newest_date == TODAY
+
+    sleep = db.scalar(select(Sleep).where(Sleep.calendar_date == TODAY))
+    assert sleep is not None
+    assert (sleep.total_sleep_s, sleep.overall_score) == (27000, 81)
+
+    vo2 = db.scalar(select(Vo2Max).where(Vo2Max.calendar_date == TODAY))
+    assert vo2 is not None
+    assert (vo2.sport, vo2.vo2max_value) == ("RUNNING", pytest.approx(48.1))
 
     activity = db.scalar(select(Activity).where(Activity.activity_id == 1001))
     assert activity is not None
@@ -351,6 +385,20 @@ def test_sync_endpoint_missing_credentials(sync_test):
 
     resp = client.post("/api/ingestion/sync", json={}, headers=headers)
     assert resp.status_code == 403
+    assert "GARMIN_API_KEY" in resp.json()["detail"]
+
+
+def test_sync_endpoint_prefers_personal_api_key_client(sync_test):
+    client, _db, headers = sync_test
+    personal = FakeGarminClient()
+    password_client = FakeGarminClient()
+    app.dependency_overrides[get_personal_api_client] = lambda: personal
+    app.dependency_overrides[get_garmin_client] = lambda: password_client
+
+    resp = client.post("/api/ingestion/sync", json={}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert personal.calls and not password_client.calls
 
 
 def test_sync_endpoint_mfa_challenge(sync_test):

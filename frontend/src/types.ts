@@ -171,6 +171,8 @@ export interface SyncReport {
   activities: number
   daily_wellness: number
   hrv: number
+  sleep: number
+  vo2max: number
   training_readiness: number
   training_load: number
   skipped_datasets: string[]

@@ -7,7 +7,7 @@ AI running coach → Garmin Connect. Generates weekly running workouts from your
 - Backend: FastAPI + SQLite, Python 3.12 via `uv`
 - Frontend: Vite + React + TypeScript, styled per `STYLE_GUIDE.md`
 - LLM: provider-agnostic (Kimi K2 default, Claude fallback), with a deterministic fallback when no API key is configured
-- Garmin: unofficial `python-garminconnect` client for read/write
+- Garmin: official Personal API (`GARMIN_API_KEY`) for sync reads; unofficial `python-garminconnect` client for push (and as the sync fallback)
 
 ## Run locally
 
@@ -83,7 +83,7 @@ make migrate
 
 To schedule a one-off session outside the weekly plan, open **Workouts**, build and save a workout, then push it to a date. Pushing the same workout twice to the same date creates two Garmin calendar entries.
 
-Push and auto-sync require real Garmin credentials. The daily guard and workout generator run entirely on local data.
+Sync reads with a Garmin Personal API key (`GARMIN_API_KEY`, created at https://connect.garmin.com/app/settings/personalApiToken) when one is set, otherwise with `GARMIN_EMAIL`/`GARMIN_PASSWORD`. Push always needs the email/password, because the Personal API has no workout or calendar endpoints. The daily guard and workout generator run entirely on local data.
 
 ## Run with Docker
 
